@@ -18,6 +18,41 @@ IMPORTANT: You MUST verify the following before proceeding.
    - Verify it has the required structure (Objective, Motivation, Implementation Details, Discussion sections).
    - Run `scripts/task-status.sh <prd-name>` to understand the current state.
 
+3. **Detect whether this is an umbrella PRD**
+   - An umbrella PRD's leaves point at child PRDs (their `spec` is a `PRD.md`). `scripts/list-prds.sh` tags it `is_umbrella: true`, and `scripts/umbrella-status.sh <prd>` succeeds on it (exits 2 on a normal PRD).
+   - **If umbrella** → follow "Planning an Umbrella PRD" below instead of the linear Workflow Steps. Planning an umbrella means planning its **children**, not writing tasks for the umbrella itself.
+   - Otherwise, continue with the normal flow.
+
+## Planning an Umbrella PRD
+
+When the user runs *"plan the `<umbrella>` PRD"*, do **not** make them list and plan each child by hand. Drive the slate:
+
+1. **Show the status board.** Run `scripts/umbrella-status.sh <umbrella>` and render it as a table the user can scan:
+
+   | Level | PRD | Plan | Work |
+   |-------|-----|------|------|
+   | L0 | f0-combat-contract | planned | complete |
+   | L1 | f1-live-authority-loop | planned | started |
+   | L1 | f2-spatial-index | ready-to-plan | needs-plan |
+   | L2 | f8-polish | requires-work | needs-plan |
+
+   One row per `children[]` entry (`Level` = `L<level>`, `PRD` = `prd`, `Plan` = `plan_status`, `Work` = `work_status`). This is the same table WorkPRD shows.
+
+   The `Plan` column distinguishes **`ready-to-plan`** (plannable now) from **`requires-work`** (a gated level whose earlier levels must be *implemented* first — see `reference/prd-spec.md`, "Planning that depends on earlier implementation"). `requires-work` children appear in the script's `blocked_plan_levels` with the `waiting_on` levels.
+
+2. **Ask the scope.** Offer the user the choice (use the `next_plan_level` pointer to name the next one concretely):
+   - **Plan the next level** — the children in `next_plan_level` (e.g. "plan L1: f2-spatial-index, f3-…"). This is the common path: plans are dependency-ordered (L0 → L1 → L2), and L0 usually gates the data shapes the rest depend on, so plan one level at a time.
+   - **Plan all** children that are **`ready-to-plan`** right now (skip `requires-work` ones — they aren't plannable yet).
+   - **Plan a specific child** they name (if it's `requires-work`, warn that its plan depends on earlier levels being implemented first).
+
+   **Surface blocked planning.** If `blocked_plan_levels` is non-empty, tell the user which levels are gated and what unblocks them — e.g. *"L2 (Polish) can't be planned yet; implement L1 (Foundation) first — `work the <umbrella> PRD`."* If **every** child is already `planned`, say so and suggest working it (*"work the `<umbrella>` PRD"*). If nothing is `ready-to-plan` but unplanned `requires-work` children remain, the next step is to **work**, not plan.
+
+3. **Scaffold first.** Before planning a child whose `work_status` is `needs-scaffold` (its `PRD.md` doesn't exist yet), run `scripts/init-umbrella-children.sh <umbrella>` (or `--child <name>` for one). That creates a stub child PRD seeded from the umbrella leaf. Treat a freshly scaffolded child as needing a quick **CreatePRD** pass — fill its Objective/Motivation/Constraints/Discussion from the umbrella's cross-cutting context (and a short clarification with the user where needed) — before the full analysis in step 4.
+
+4. **Plan each chosen child.** For every child in scope, apply the **normal Workflow Steps below (1–11) to the child PRD** (the child name is the directory its leaf's `spec` points into, e.g. `f2-spatial-index`). Children in the same level are independent — plan them in any order. The umbrella's own cross-cutting decisions and dependency ordering already live in the umbrella `PRD.md`; per-slice architecture belongs to each child.
+
+5. **Re-show the board and report.** As each child gains `defined` tasks, the umbrella's leaf status rolls up automatically (via `update-task-status.sh`). Re-run `scripts/umbrella-status.sh <umbrella>`, render the updated table, and suggest the next step: plan the next level, or — once a level is fully `planned` — *"work the `<umbrella>` PRD"*.
+
 ## Workflow Steps
 
 These workflow steps MUST be followed exactly as written.
@@ -253,9 +288,10 @@ First decide the **shape** of the plan:
 
 If the effort is large and naturally decomposes into slices that can be planned and worked **independently** (different subsystems, a dependency-ordered slate), it is often better to create **several PRDs** than one monolith. In that case make this PRD an **umbrella**: its `tasks.yaml` leaves point at child PRDs rather than at task specs.
 
-- Create one child PRD directory per slice (each a normal PRD planned separately — apply the **PlanPRD** workflow to each child).
-- In the umbrella `tasks.yaml`, each leaf's `spec` is the child's `PRD.md` (e.g. `../f0-combat-contract/PRD.md`); top-level entries are dependency **levels** (sequential), subtasks are same-level slices (parallel).
-- Do **not** hand-maintain umbrella leaf statuses — they are derived from the children by `scripts/sync-umbrella.sh`. See `reference/prd-spec.md` ("Umbrella PRDs").
+- Write the umbrella `tasks.yaml`: each leaf's `spec` is the child's `PRD.md` (e.g. `../f0-combat-contract/PRD.md`), `status: draft`; top-level entries are dependency **levels** (sequential), subtasks are same-level slices (parallel).
+- Scaffold the child PRDs with `scripts/init-umbrella-children.sh <prd_name>` — it creates a stub `PRD.md` for each leaf so they exist and validate.
+- Then plan the children: this is exactly the "Planning an Umbrella PRD" flow at the top of this document — show the status board, plan a level (usually L0 first) or all, applying the normal steps to each child. **Stop generating tasks/specs for the umbrella itself** (skip Steps 10–11 for the umbrella; they apply per child).
+- Do **not** hand-maintain umbrella leaf statuses — they are derived from the children (`update-task-status.sh` auto-rolls-up; `scripts/sync-umbrella.sh` forces it). See `reference/prd-spec.md` ("Umbrella PRDs").
 - The cross-cutting decisions and dependency ordering ARE the umbrella's value; per-slice architecture belongs to each child PRD.
 
 > Unsure whether to split, or how? The sibling **breakdown** skill analyzes a PRD and proposes a decomposition (subtasks or umbrella) you can apply.

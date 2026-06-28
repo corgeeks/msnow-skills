@@ -72,17 +72,32 @@ Spawn a subagent that owns the task end-to-end:
 
 An umbrella PRD is not implemented directly — each leaf is a **child PRD** worked separately. This workflow drives that slate and reflects progress back.
 
-1. **Sync first.** Run `scripts/sync-umbrella.sh <umbrella>` so the umbrella leaf statuses reflect the children's real progress before deciding what to do.
+1. **Show the status board.** Run `scripts/umbrella-status.sh <umbrella>` and render it as a table (same as PlanPRD):
 
-2. **Pick the next work in dependency order.** Top-level entries are dependency levels (work them **sequentially**); subtasks within a level are slices whose dependencies are satisfied (they may proceed in **parallel**). Skip leaves already `completed`.
+   | Level | PRD | Plan | Work |
+   |-------|-----|------|------|
+   | L0 | f0-combat-contract | planned | complete |
+   | L1 | f1-live-authority-loop | planned | started |
+   | L1 | f2-spatial-index | ready-to-plan | needs-plan |
 
-3. **Work each child slice.** For a leaf whose status is `defined` (child fully planned) or `in-progress` (child partially done), apply the normal **WorkPRD** flow to the child PRD (the child name is the directory the leaf's `spec` points into, e.g. `f0-combat-contract`). If a leaf is `draft`, the child still needs planning — apply **PlanPRD** to it first (or surface it).
+   One row per `children[]` entry. The board is computed live, so it's accurate without a prior sync.
 
-4. **Sync after each child.** Run `scripts/sync-umbrella.sh <umbrella>` again so the completed/partial child is reflected in the umbrella leaf. Never hand-edit umbrella leaf statuses — they are derived.
+2. **Ask the scope** (use the `next_work_level` pointer to name it concretely):
+   - **Work the next level** — the actionable children in `next_work_level` (`ready` = planned & not started, `started` = resume in progress). Levels are sequential, so finish the lowest incomplete level before the next.
+   - **Work all** actionable children across the current level.
+   - **Work a specific child** they name.
 
-5. **Repeat** until all umbrella leaves are `completed`, then report.
+   If a child you'd work is `needs-plan` / `needs-scaffold` (in `next_work_level.needs_plan`), it isn't ready — surface it and offer to plan it first (PlanPRD), or `scripts/init-umbrella-children.sh` then plan. Skip leaves already `complete`.
 
-The umbrella's own statuses always trail the children: `sync-umbrella.sh` maps child-not-planned→`draft`, child-planned→`defined`, child-partly-done→`in-progress`, child-all-done→`completed`.
+3. **Work each child slice.** For a child whose `work_status` is `ready` or `started`, apply the normal **WorkPRD** flow to that child PRD (the child name is the directory the leaf's `spec` points into, e.g. `f0-combat-contract`). Children in the same level are independent and may proceed in **parallel**.
+
+4. **Progress rolls up automatically.** As the child's workers update task statuses, `update-task-status.sh` re-syncs the umbrella leaf for you — no manual sync needed. (`scripts/sync-umbrella.sh <umbrella>` is the manual escape hatch if you ever hand-edit a child's `tasks.yaml`.) Never hand-edit umbrella leaf statuses — they are derived.
+
+5. **Repeat** — re-run `scripts/umbrella-status.sh <umbrella>` and continue until every child is `complete`, then report.
+
+**Implementation can unlock planning.** Some levels are deliberately planned *after* earlier ones are implemented (a level with `plan_after_prior: true`; its children show `requires-work` until then). When you finish a level, a later level may flip from `requires-work` to `ready-to-plan` — at that point switch to **PlanPRD** (*"plan the `<umbrella>` PRD"*) to plan it, then come back and work it. The board's `next_plan_level` / `blocked_plan_levels` tell you when this applies.
+
+The umbrella's own statuses always trail the children: child-not-planned→`draft`, child-planned→`defined`/`ready`, child-partly-done→`in-progress`/`started`, child-all-done→`completed`/`complete`.
 
 ## Step 2: Update Documentation
 

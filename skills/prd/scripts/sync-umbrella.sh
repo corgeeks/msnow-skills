@@ -21,6 +21,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/yq-compat.sh
 source "${SCRIPT_DIR}/lib/yq-compat.sh"
+# shellcheck source=lib/umbrella-lib.sh
+source "${SCRIPT_DIR}/lib/umbrella-lib.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -48,36 +50,8 @@ fi
 
 TASKS_JSON=$(yaml_to_json "$TASKS_FILE")
 
-# Given a child PRD's tasks file, emit a JSON object with status counts plus the
-# umbrella status the parent leaf should take.
-compute_child_status() {
-    local child_tasks="$1"
-    local child_json="null"
-    if [[ -f "$child_tasks" ]]; then
-        child_json=$(yaml_to_json "$child_tasks" 2>/dev/null || echo "null")
-    fi
-    jq -n --argjson t "$child_json" '
-        (if ($t | type) == "array" then $t else [] end) as $t
-        | ([ ($t[] | select(.status)), ($t[] | .subtasks[]? | select(.status)) ]) as $all
-        | ($all | map(select(.status == "draft"))       | length) as $draft
-        | ($all | map(select(.status == "defined"))     | length) as $defined
-        | ($all | map(select(.status == "in-progress")) | length) as $inprog
-        | ($all | map(select(.status == "completed"))   | length) as $done
-        | ($draft + $defined + $inprog + $done) as $total
-        | {
-            draft: $draft,
-            defined: $defined,
-            "in-progress": $inprog,
-            completed: $done,
-            total: $total,
-            status: (
-                if   $total == 0                       then "draft"
-                elif $done == $total                   then "completed"
-                elif ($done > 0 or $inprog > 0)        then "in-progress"
-                elif $draft == 0                       then "defined"
-                else "draft" end)
-          }'
-}
+# Child-status rollup lives in lib/umbrella-lib.sh (ul_child_status) so the status
+# board (umbrella-status.sh) and this sync compute it identically.
 
 changes="[]"
 synced=0
@@ -96,13 +70,16 @@ while IFS= read -r row; do
     child_name=$(basename "$spec_dir")
     child_tasks="${PRD_DIR}/${spec_dir}/tasks.yaml"
 
-    child_info=$(compute_child_status "$child_tasks")
+    child_info=$(ul_child_status "$child_tasks")
     new=$(jq -r '.status' <<< "$child_info")
 
     synced=$((synced + 1))
     is_changed="false"
     if [[ "$new" != "$cur" ]]; then
-        "${SCRIPT_DIR}/update-task-status.sh" "$PRD_NAME" "$name" "$new" >/dev/null
+        # Guard against re-entrancy: update-task-status.sh rolls a status change
+        # back up to parent umbrellas, but here WE are the umbrella doing the
+        # rolling, so suppress that to avoid a sync loop.
+        PRD_NO_UMBRELLA_SYNC=1 "${SCRIPT_DIR}/update-task-status.sh" "$PRD_NAME" "$name" "$new" >/dev/null
         is_changed="true"
         changed_count=$((changed_count + 1))
     fi

@@ -58,6 +58,12 @@ right workflow:
 - **Work** — "work the user-authentication PRD" → resumes any interrupted
   (`in-progress`) tasks first, then dispatches a worker per defined task. For an
   umbrella, it drives the child slate and syncs progress back up.
+
+For an **umbrella PRD**, you drive the whole slate through the parent — "plan the
+combat-next PRD" plans its child PRDs level by level (L0 → L1 → …), and "work the
+combat-next PRD" implements them — without listing each child by hand. Both open
+with a status board (`| Level | PRD | Plan | Work |`) and offer "do the next level"
+or "do all". Child progress rolls up to the umbrella automatically.
 - **Break down** — "this PRD is too big, break it down" → analysis + a proposed
   decomposition; restructures `tasks.yaml` after you confirm.
 
@@ -79,7 +85,9 @@ directory):
 scripts/list-prds.sh
 scripts/task-status.sh <name>
 scripts/validate-prd.sh <name>
-scripts/sync-umbrella.sh <umbrella-name>
+scripts/umbrella-status.sh <umbrella-name>        # per-child plan/work status board
+scripts/init-umbrella-children.sh <umbrella-name> # scaffold child PRDs from leaves
+scripts/sync-umbrella.sh <umbrella-name>          # (usually automatic) roll child progress up
 ```
 
 See `skills/prd/reference/cli-tools.md` for the full list.
@@ -101,7 +109,8 @@ For a **project** install (`.claude/skills/prd/`):
         "matcher": "Edit|Write",
         "hooks": [
           { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/skills/prd/hooks/validate-tasks.sh" },
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/skills/prd/hooks/validate-research.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/skills/prd/hooks/validate-research.sh" },
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/skills/prd/hooks/sync-umbrellas.sh" }
         ]
       }
     ]
@@ -112,6 +121,11 @@ For a **project** install (`.claude/skills/prd/`):
 For a **global** install, use the absolute path instead, e.g.
 `~/.claude/skills/prd/hooks/validate-tasks.sh`. The hooks degrade gracefully if
 `jq`/`yq`/`check-jsonschema` are missing (they skip rather than block).
+
+`sync-umbrellas.sh` is optional: when a child PRD's `tasks.yaml` is edited by hand,
+it rolls that progress up into any umbrella that owns the child. Status changes
+made through `scripts/update-task-status.sh` (what the workers use) already
+roll up on their own, so this hook only covers manual edits.
 
 ## Layout
 
@@ -125,7 +139,7 @@ msnow-skills/
     │   ├── reference/      # prd-spec, task-spec, log-spec, cli-tools
     │   ├── schemas/        # tasks.schema.json, research.schema.json
     │   ├── scripts/        # CLI tools (+ lib/, validate-prd.sh)
-    │   └── hooks/          # optional PostToolUse validators
+    │   └── hooks/          # optional PostToolUse validators + umbrella auto-sync
     └── breakdown/
         ├── SKILL.md
         └── reference/      # heuristics

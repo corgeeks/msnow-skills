@@ -13,7 +13,8 @@ Lists all PRDs with their status. Returns JSON output.
 
 ```bash
 scripts/list-prds.sh
-# Output: [{"name": "my-feature", "status": "in-progress", "completed": 3, "total": 5}, ...]
+# Output: [{"name": "my-feature", "status": "in-progress", "completed": 3, "total": 5,
+#           "is_umbrella": false, "umbrella_parent": null}, ...]
 ```
 
 **Statuses**:
@@ -21,6 +22,10 @@ scripts/list-prds.sh
 - `in-progress` - At least one but not all tasks completed
 - `complete` - All tasks completed
 - `no-tasks` - No tasks.yaml or no tasks defined
+
+**Umbrella tags** (every entry):
+- `is_umbrella` - `true` if this PRD's leaves point at child PRDs (a program tracker)
+- `umbrella_parent` - the umbrella PRD that owns this one as a child slice, else `null`
 
 ## Task Management
 
@@ -95,7 +100,60 @@ scripts/update-task-status.sh my-feature "Implement API endpoint" in-progress
 # Valid statuses: draft, defined, in-progress, completed
 ```
 
+**Auto-roll-up:** if the PRD is a child of one or more umbrella PRDs, this also
+re-syncs those umbrellas so their derived leaf statuses never drift (a worker
+completing a child task updates the umbrella automatically). Set
+`PRD_NO_UMBRELLA_SYNC=1` to suppress it; `sync-umbrella.sh` sets that internally to
+avoid a sync loop.
+
 ## Umbrella PRDs
+
+### `scripts/umbrella-status.sh <umbrella-prd-name>`
+
+The status board for a slate: per child, its dependency `level`, `plan_status`
+(`ready-to-plan`|`requires-work`|`planned`) and `work_status`
+(`needs-scaffold`|`needs-plan`|`ready`|`started`|`complete`), computed **live** from
+each child's `tasks.yaml`. Read-only. Render it as `| Level | PRD | Plan | Work |`.
+The `next_plan_level` / `next_work_level` pointers give the next dependency level to
+plan / work, so "plan (or work) the next one" needs no hand computation. Errors
+(exit 2) on a non-umbrella PRD — use `task-status.sh` for those.
+
+`requires-work` and `blocked_plan_levels` come from the `plan_after_prior` level
+gate (see `reference/prd-spec.md`, "Planning that depends on earlier
+implementation"): an unplanned child in a gated level reads as `requires-work`
+until every earlier level is implemented, then flips to `ready-to-plan`.
+
+```bash
+scripts/umbrella-status.sh combat-next-v2
+# Output: {
+#   "prd": "combat-next-v2",
+#   "children": [{"level":0,"level_name":"L0 · Contract","prd":"f0-combat-contract",
+#                 "plan_status":"planned","work_status":"complete","child_prd_exists":true,
+#                 "counts":{"draft":0,"defined":0,"in-progress":0,"completed":7,"total":7}}, ...],
+#   "levels": [...],
+#   "summary": {"children":12,"levels":4,"planned":8,"ready_to_plan":1,"requires_work":1,
+#               "ready":2,"started":1,"complete":5},
+#   "next_plan_level": {"level":1,"name":"...","children":["f3-spatial-index"]},
+#   "blocked_plan_levels": [{"level":2,"name":"L2 · Polish","children":["f8-tuning"],
+#                            "waiting_on":[{"level":1,"name":"L1 · Foundation"}]}],
+#   "next_work_level": {"level":1,"name":"...","ready":["f3-..."],"started":["f1-..."],"needs_plan":[]}
+# }
+```
+
+### `scripts/init-umbrella-children.sh <umbrella-prd-name> [--child <name>]`
+
+Scaffolds a stub `PRD.md` for each umbrella leaf whose child PRD doesn't exist yet
+(Objective/Motivation seeded from the leaf; the rest left as planning
+placeholders). With `--child`, scaffolds only that one. Idempotent — existing
+child PRDs are left untouched — and it changes no statuses. Run it right after an
+umbrella is shaped, then plan each child.
+
+```bash
+scripts/init-umbrella-children.sh combat-next-v2
+# Output: {"umbrella": "combat-next-v2", "created": ["f2-foo"],
+#          "skipped": ["f0-combat-contract","f1-live-authority-loop"],
+#          "created_count": 1, "skipped_count": 2}
+```
 
 ### `scripts/sync-umbrella.sh <umbrella-prd-name>`
 
@@ -112,7 +170,10 @@ maps it back:
 | all tasks completed | `completed` |
 
 It is idempotent and leaves non-umbrella leaves (specs under `specs/`) untouched,
-so it is safe to run on any PRD.
+so it is safe to run on any PRD. You rarely need to call it directly now that
+`update-task-status.sh` auto-rolls-up, but it's the manual escape hatch (and what
+the optional `hooks/sync-umbrellas.sh` runs after a hand edit to a child
+`tasks.yaml`).
 
 ```bash
 scripts/sync-umbrella.sh combat-next-v2
