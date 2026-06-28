@@ -83,7 +83,7 @@ done < <(jq -c '.[]' <<< "$LEAVES")
 
 jq -n --arg prd "$PRD_NAME" --argjson rows "$rows" '
     # Levels in dependency order, each with its implementation completeness.
-    ($rows | group_by(.level) | sort_by(.[0].level) | map({
+    ($rows | sort_by(.level) | group_by(.level) | map({
         level: .[0].level,
         name: .[0].level_name,
         plan_after_prior: (.[0].plan_after_prior // false),
