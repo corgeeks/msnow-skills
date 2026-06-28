@@ -16,7 +16,7 @@ IMPORTANT: You MUST verify the following before proceeding.
 2. **Verify the PRD exists**
    - Check that `.claude/prds/[prd_name]/PRD.md` exists.
    - Verify it has the required structure (Objective, Motivation, Implementation Details, Discussion sections).
-   - Run `scripts/task-status.sh <prd-name>` to understand the current state.
+   - Run `scripts/umbrella-status.sh <prd-name>` if it's an umbrella PRD; otherwise run `scripts/task-status.sh <prd-name>` to understand the current state.
 
 3. **Detect whether this is an umbrella PRD**
    - An umbrella PRD's leaves point at child PRDs (their `spec` is a `PRD.md`). `scripts/list-prds.sh` tags it `is_umbrella: true`, and `scripts/umbrella-status.sh <prd>` succeeds on it (exits 2 on a normal PRD).
