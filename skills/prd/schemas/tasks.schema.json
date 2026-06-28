@@ -39,6 +39,10 @@
             "$ref": "#/$defs/leafTask"
           },
           "minItems": 1
+        },
+        "plan_after_prior": {
+          "type": "boolean",
+          "description": "Umbrella levels only: when true, this level's children are not 'ready-to-plan' until every earlier dependency level is fully implemented (all their children completed). Use when a level's plan genuinely can't be written until prior work exists. Read from the top-level (level) entry; ignored on ordinary tasks."
         }
       },
       "required": ["name", "description", "subtasks"],
@@ -64,6 +68,10 @@
         "spec": {
           "type": "string",
           "description": "Path to the file that defines the task parameters in detail"
+        },
+        "plan_after_prior": {
+          "type": "boolean",
+          "description": "Umbrella levels only: when this leaf is a top-level (level) entry, when true its planning is gated until every earlier dependency level is fully implemented. See parentTask.plan_after_prior. Ignored on ordinary leaf tasks and subtasks."
         }
       },
       "required": ["name", "description", "status", "spec"],

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Lists all PRDs with their status and task completion counts
+# Lists all PRDs with their status and task completion counts.
+#
+# Each entry is additionally tagged for umbrella relationships:
+#   is_umbrella     - true if this PRD's leaves point at child PRDs (a program tracker)
+#   umbrella_parent - the umbrella PRD that owns this one as a child slice, else null
+# so the prd skill can group children under their umbrella in the listing.
 
 set -euo pipefail
 
 # shellcheck source=lib/yq-compat.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/yq-compat.sh"
+# shellcheck source=lib/umbrella-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/umbrella-lib.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -15,6 +22,28 @@ if [[ ! -d "$PRD_DIR" ]]; then
     echo "[]"
     exit 0
 fi
+
+# Pre-pass: map which PRDs are umbrellas and which PRDs are their children, so the
+# second pass can tag each entry without depending on directory iteration order.
+declare -A IS_UMBRELLA=()
+declare -A PARENT_OF=()
+
+for prd_path in "$PRD_DIR"/*/; do
+    [[ -d "$prd_path" ]] || continue
+    name=$(basename "$prd_path")
+    tasks_file="${prd_path}tasks.yaml"
+    [[ -f "$tasks_file" ]] || continue
+
+    tasks_json=$(yaml_to_json "$tasks_file" 2>/dev/null || echo "null")
+    leaves=$(ul_leaves "$tasks_json" "${prd_path%/}")
+    [[ "$(jq 'length' <<< "$leaves")" -gt 0 ]] || continue
+
+    IS_UMBRELLA["$name"]=1
+    while IFS= read -r child; do
+        [[ -z "$child" ]] && continue
+        PARENT_OF["$child"]="$name"
+    done < <(jq -r '.[].child_name' <<< "$leaves")
+done
 
 # Build JSON array of PRD statuses
 result="[]"
@@ -27,10 +56,18 @@ for prd_path in "$PRD_DIR"/*/; do
     prd_name=$(basename "$prd_path")
     tasks_file="${prd_path}tasks.yaml"
 
+    is_umbrella="false"
+    [[ -n "${IS_UMBRELLA[$prd_name]:-}" ]] && is_umbrella="true"
+    parent="${PARENT_OF[$prd_name]:-}"
+
     if [[ ! -f "$tasks_file" ]]; then
         # No tasks file
         result=$(jq --arg name "$prd_name" \
-            '. += [{"name": $name, "status": "no-tasks", "completed": 0, "total": 0}]' \
+            --argjson is_umbrella "$is_umbrella" \
+            --arg parent "$parent" \
+            '. += [{"name": $name, "status": "no-tasks", "completed": 0, "total": 0,
+                    "is_umbrella": $is_umbrella,
+                    "umbrella_parent": (if $parent == "" then null else $parent end)}]' \
             <<< "$result")
         continue
     fi
@@ -67,7 +104,11 @@ for prd_path in "$PRD_DIR"/*/; do
         --arg status "$status" \
         --argjson completed "$completed" \
         --argjson total "$total" \
-        '. += [{"name": $name, "status": $status, "completed": $completed, "total": $total}]' \
+        --argjson is_umbrella "$is_umbrella" \
+        --arg parent "$parent" \
+        '. += [{"name": $name, "status": $status, "completed": $completed, "total": $total,
+                "is_umbrella": $is_umbrella,
+                "umbrella_parent": (if $parent == "" then null else $parent end)}]' \
         <<< "$result")
 done
 

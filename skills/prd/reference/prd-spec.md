@@ -161,10 +161,77 @@ represents one child PRD and its `spec` points at that child's `PRD.md`.
 | `completed` | Child fully implemented (all of its tasks completed) |
 
 **Feedback (this is the point):** umbrella leaf statuses are **derived** from the
-children, not edited by hand. Run `scripts/sync-umbrella.sh <umbrella>` to pull
-each child's aggregate progress back into the umbrella. Run it at the start of
-working an umbrella, after finishing each child slice, and whenever you want the
-umbrella to reflect reality. See `workflows/WorkPRD.md` for the driving loop.
+children, not edited by hand. They roll up **automatically**:
+`scripts/update-task-status.sh` re-syncs any parent umbrella whenever a child task
+changes status, so a worker finishing a child task updates the umbrella with no
+extra step. `scripts/sync-umbrella.sh <umbrella>` forces the same recompute on
+demand (idempotent; safe on any PRD). See `workflows/WorkPRD.md` for the driving
+loop.
+
+### The umbrella status board (plan vs work)
+
+`scripts/umbrella-status.sh <umbrella>` is the at-a-glance view of a slate. It
+reports, per child, the dependency **level** and two orthogonal statuses, computed
+**live** from each child's own `tasks.yaml` (so it is correct even if a sync has
+not been run). The single leaf-status enum splits into these two columns:
+
+| Leaf status | `plan_status` | `work_status` | Meaning |
+|-------------|---------------|---------------|---------|
+| `draft` (no child PRD yet) | `ready-to-plan` \| `requires-work` | `needs-scaffold` | child PRD.md doesn't exist — scaffold it |
+| `draft` | `ready-to-plan` \| `requires-work` | `needs-plan` | child exists but isn't planned (run PlanPRD on it) |
+| `defined` | `planned` | `ready` | child fully planned, nothing started (run WorkPRD on it) |
+| `in-progress` | `planned` | `started` | child partially implemented |
+| `completed` | `planned` | `complete` | child fully implemented |
+
+The skill renders this as a table when planning or working an umbrella:
+
+| Level | PRD | Plan | Work |
+|-------|-----|------|------|
+| L0 | f0-combat-contract | planned | complete |
+| L1 | f1-live-authority-loop | planned | started |
+| L1 | f2-spatial-index | ready-to-plan | needs-plan |
+| L2 | f8-polish | requires-work | needs-plan |
+
+The script also returns `next_plan_level` and `next_work_level` pointers — the
+lowest dependency level with `ready-to-plan` children / actionable work — so "plan
+the next one" / "work the next one" need no hand computation.
+
+### Planning that depends on earlier implementation
+
+By default every unplanned child is `ready-to-plan`: you may plan all levels up
+front and work them in order. But sometimes a later level genuinely **cannot be
+planned until an earlier level is implemented** — e.g. L2's plan depends on data
+shapes that only exist once L1 is built. Mark such a level with
+`plan_after_prior: true` (an optional field on the **level** — the top-level
+umbrella entry):
+
+```yaml
+- name: "L2 · Polish & integration"
+  description: "Can only be planned once the L1 systems exist in code."
+  plan_after_prior: true          # <- gate: don't plan until earlier levels are implemented
+  subtasks:
+    - name: "F8 — Tuning pass"
+      description: "..."
+      spec: "../f8-tuning/PRD.md"
+      status: draft
+```
+
+While any earlier level is not yet fully `complete`, that level's unplanned
+children read as **`requires-work`** (and `umbrella-status.sh` lists the level
+under `blocked_plan_levels` with the `waiting_on` levels that must be implemented
+first). Once every earlier level is `complete`, they flip to **`ready-to-plan`**
+automatically. Levels without the flag are always `ready-to-plan` — the gate is
+opt-in and changes nothing for umbrellas that can be planned ahead.
+
+### Scaffolding children
+
+An umbrella is often shaped (by PlanPRD or the **breakdown** skill) before its
+child PRDs exist, leaving leaves that point at not-yet-created `PRD.md` files.
+`scripts/init-umbrella-children.sh <umbrella> [--child <name>]` materializes those
+missing children as stub PRDs (Objective/Motivation seeded from the leaf, the rest
+left as planning placeholders), so each can then be planned. It is idempotent —
+existing child PRDs are never touched — and it changes no statuses (a scaffolded
+child has no tasks, so it reads as `draft` / `needs-plan` until you run PlanPRD).
 
 ## Key Rules
 

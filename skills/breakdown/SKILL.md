@@ -81,8 +81,9 @@ Edit `.claude/prds/<name>/tasks.yaml` to conform to `../prd/schemas/tasks.schema
 
 ### Convert to an umbrella
 - Replace the implementation tasks with **umbrella leaves**: top-level entries are dependency **levels** (worked sequentially); subtasks within a level are slices that can run in **parallel**.
+- If a level genuinely **can't be planned until an earlier level is implemented** (its plan depends on code that doesn't exist yet), mark that level `plan_after_prior: true`. The status board then shows its children as `requires-work` until the earlier levels are `complete`, rather than `ready-to-plan`. Default (omit it) means the level can be planned ahead. See `../prd/reference/prd-spec.md`, "Planning that depends on earlier implementation."
 - Each leaf's `spec` points at a child PRD's `PRD.md` (e.g. `../<child-name>/PRD.md`) and starts as `status: draft` (the child isn't planned yet — draft umbrella leaves don't require the file to exist, so this validates).
-- This skill restructures the **umbrella's** `tasks.yaml` only; it does **not** create the child PRD directories. After confirming, direct the user to create and plan each child with the prd skill (CreatePRD → PlanPRD), then drive them with WorkPRD. `../prd/scripts/sync-umbrella.sh <name>` will roll child progress back up once they exist.
+- This skill restructures the **umbrella's** `tasks.yaml` only. To create the child PRD directories, run `../prd/scripts/init-umbrella-children.sh <name>` — it scaffolds a stub `PRD.md` for every leaf that lacks one. Then the user plans the whole slate in one go with the prd skill: *"plan the `<name>` PRD"* (PlanPRD's umbrella branch shows the status board and plans each child level by level), and later *"work the `<name>` PRD"*. Child progress rolls up automatically; `../prd/scripts/umbrella-status.sh <name>` shows the board and `../prd/scripts/sync-umbrella.sh <name>` is the manual sync.
 
 After any rewrite, run `../prd/scripts/validate-prd.sh <name>` and fix anything it flags.
 
@@ -90,7 +91,7 @@ After any rewrite, run `../prd/scripts/validate-prd.sh <name>` and fix anything 
 
 1. Confirm what was changed (or that nothing was changed).
 2. Show the new task status counts.
-3. Next steps: for split tasks → plan the new subtasks (prd skill, PlanPRD). For an umbrella → create + plan each child PRD, then work the umbrella.
+3. Next steps: for split tasks → plan the new subtasks (prd skill, PlanPRD). For an umbrella → run `../prd/scripts/init-umbrella-children.sh <name>` to scaffold the child PRDs, then *"plan the `<name>` PRD"* and *"work the `<name>` PRD"*.
 
 ## Principles
 

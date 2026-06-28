@@ -3,8 +3,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/yq-compat.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/yq-compat.sh"
+source "${SCRIPT_DIR}/lib/yq-compat.sh"
+# shellcheck source=lib/umbrella-lib.sh
+source "${SCRIPT_DIR}/lib/umbrella-lib.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -61,3 +64,14 @@ fi
 yaml_set_status "$TASKS_FILE" "$TASK_NAME" "$NEW_STATUS"
 
 echo "Updated task '$TASK_NAME' status to '$NEW_STATUS'"
+
+# Auto-roll-up: if this PRD is a child of one or more umbrella PRDs, refresh those
+# umbrellas so their derived leaf statuses never drift from reality. Re-entrancy
+# is guarded by PRD_NO_UMBRELLA_SYNC (set by sync-umbrella.sh when it calls back
+# into this script). Best-effort — a sync hiccup never fails the status update.
+if [[ -z "${PRD_NO_UMBRELLA_SYNC:-}" ]]; then
+    while IFS= read -r parent; do
+        [[ -z "$parent" ]] && continue
+        PRD_NO_UMBRELLA_SYNC=1 "${SCRIPT_DIR}/sync-umbrella.sh" "$parent" >/dev/null 2>&1 || true
+    done < <(ul_parent_umbrellas "$PRD_NAME")
+fi
