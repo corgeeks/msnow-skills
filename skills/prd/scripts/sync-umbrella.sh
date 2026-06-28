@@ -76,10 +76,9 @@ while IFS= read -r row; do
     synced=$((synced + 1))
     is_changed="false"
     if [[ "$new" != "$cur" ]]; then
-        # Guard against re-entrancy: update-task-status.sh rolls a status change
-        # back up to parent umbrellas, but here WE are the umbrella doing the
-        # rolling, so suppress that to avoid a sync loop.
-        PRD_NO_UMBRELLA_SYNC=1 "${SCRIPT_DIR}/update-task-status.sh" "$PRD_NAME" "$name" "$new" >/dev/null
+        # Allow update-task-status.sh to roll this leaf status change upward to any
+        # parent umbrella(s) that reference this PRD; ul_parent_umbrellas excludes self.
+        "${SCRIPT_DIR}/update-task-status.sh" "$PRD_NAME" "$name" "$new" >/dev/null
         is_changed="true"
         changed_count=$((changed_count + 1))
     fi
