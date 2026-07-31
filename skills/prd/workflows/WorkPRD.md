@@ -53,7 +53,7 @@ Spawn a subagent that owns the task end-to-end:
   `prd_name`: [prd_name];
   `task_name`: [exact task name];
   `status_script`: [absolute path to `scripts/update-task-status.sh`];
-  `log_path`: `.claude/prds/<prd>/log.md`;
+  `log_path`: [the `log_path` field from `scripts/get-task.sh <prd> <task>`];
   `resuming`: [`true` only when re-dispatching an already `in-progress` task].
   Return only the JSON the worker prompt specifies."
 
@@ -143,7 +143,7 @@ Provide a comprehensive summary:
 
 ## Implementation Log
 
-Maintain a log at `.claude/prds/<prd-name>/log.md`. Workers write two kinds of entries (see `reference/log-spec.md`):
+Maintain a log at `<prd-root>/<prd-name>/log.md` (the `log_path` field from `scripts/get-task.sh`). Workers write two kinds of entries (see `reference/log-spec.md`):
 
 - **In Progress** checkpoints while a task is underway (with "Done so far" and "Resume from"), so an interrupted task can be resumed.
 - **Completed** entries when a task finishes.

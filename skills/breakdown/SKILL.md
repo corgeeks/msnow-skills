@@ -6,7 +6,7 @@ model: opus
 
 You analyze a **single existing PRD** and help break it into smaller, independently implementable units. You first produce a recommendation; then, only after the user confirms, you restructure the PRD's `tasks.yaml` in place.
 
-This skill is the companion to the **prd** skill. It assumes a PRD already exists at `.claude/prds/<prd-name>/` (created via the prd skill's CreatePRD/PlanPRD workflows). It does not create PRDs or implement tasks — it reshapes the plan.
+This skill is the companion to the **prd** skill. It assumes a PRD already exists at `<prd-root>/<prd-name>/` (created via the prd skill's CreatePRD/PlanPRD workflows) — `<prd-root>` is `../prd/scripts/prd-root.sh`'s output (defaults to `docs/prd`; see `../prd/reference/prd-spec.md`). It does not create PRDs or implement tasks — it reshapes the plan.
 
 ## Sibling prd skill
 
@@ -14,6 +14,7 @@ The prd skill ships the data model, scripts, and schema this skill builds on. It
 
 - Data model & rules: `../prd/reference/prd-spec.md` (read this — especially "Umbrella PRDs")
 - Tasks schema: `../prd/schemas/tasks.schema.json`
+- PRD root: `../prd/scripts/prd-root.sh` (prints the configured PRD root directory, e.g. `docs/prd`)
 - State queries: `../prd/scripts/task-status.sh`, `../prd/scripts/get-task.sh`, `../prd/scripts/list-prds.sh`
 - Validation: `../prd/scripts/validate-prd.sh`
 
@@ -23,12 +24,12 @@ See `reference/heuristics.md` in this skill for the detailed sizing signals and 
 
 ## When Invoked
 
-1. **Identify the PRD.** If no name is given, run `../prd/scripts/list-prds.sh` and ask which PRD to analyze.
+1. **Identify the PRD.** If no name is given, run `../prd/scripts/list-prds.sh` and ask which PRD to analyze. Resolve `<prd-root>` with `../prd/scripts/prd-root.sh`.
 
 2. **Read the inputs.** Read `../prd/reference/prd-spec.md`, then the target PRD:
-   - `.claude/prds/<name>/PRD.md` (objective, constraints, architecture)
-   - `.claude/prds/<name>/tasks.yaml` (the current plan)
-   - the spec files under `.claude/prds/<name>/specs/` for any sizeable tasks
+   - `<prd-root>/<name>/PRD.md` (objective, constraints, architecture)
+   - `<prd-root>/<name>/tasks.yaml` (the current plan)
+   - the spec files under `<prd-root>/<name>/specs/` for any sizeable tasks
    - `../prd/scripts/task-status.sh <name>` for the status mix
 
 3. **Check safety.** Note any `in-progress` or `completed` tasks. Restructuring touches the plan, so **never silently rewrite work that is already done or underway** — call those out and ask before changing them. The safest target is a PRD still in `draft`/`defined`.
@@ -71,7 +72,7 @@ Recommend the smallest change that fixes the actual problem. Prefer splitting ta
 
 ## Restructuring
 
-Edit `.claude/prds/<name>/tasks.yaml` to conform to `../prd/schemas/tasks.schema.json`. Two transformations (details and worked examples in `reference/heuristics.md`):
+Edit `<prd-root>/<name>/tasks.yaml` to conform to `../prd/schemas/tasks.schema.json`. Two transformations (details and worked examples in `reference/heuristics.md`):
 
 ### Split a task into subtasks
 - Convert the oversized leaf into a **parent task** (`name`, `description`, `subtasks: [...]`). A parent has no `status`/`spec` of its own.

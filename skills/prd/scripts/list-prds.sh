@@ -12,11 +12,13 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/yq-compat.sh"
 # shellcheck source=lib/umbrella-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/umbrella-lib.sh"
+# shellcheck source=lib/prd-root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/prd-root.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
 
-PRD_DIR=".claude/prds"
+PRD_DIR="$(resolve_prd_root)"
 
 if [[ ! -d "$PRD_DIR" ]]; then
     echo "[]"

@@ -9,8 +9,9 @@
 # leaves, resolving them to child directories, and rolling each child's live
 # progress back up.
 #
-# Assumes lib/yq-compat.sh is already sourced (for `yaml_to_json`) and that `jq`
-# is available. All functions print to stdout; they never mutate any file.
+# Assumes lib/yq-compat.sh and lib/prd-root.sh are already sourced (for
+# `yaml_to_json` / `resolve_prd_root`) and that `jq` is available. All
+# functions print to stdout; they never mutate any file.
 
 # Roll a child PRD's tasks.yaml up into a status summary.
 #   ul_child_status <child-tasks-file>
@@ -92,9 +93,11 @@ ul_is_umbrella() {
 # Print the names of every umbrella PRD that references <child-prd-name> as a
 # child leaf. Used to roll a child's status change back up to its parent(s).
 #   ul_parent_umbrellas <child-prd-name>
+# Assumes lib/prd-root.sh is already sourced (for `resolve_prd_root`).
 ul_parent_umbrellas() {
     local child="$1"
-    local prds_root=".claude/prds"
+    local prds_root
+    prds_root="$(resolve_prd_root)"
     [[ -d "$prds_root" ]] || return 0
     local dir name tasks tj
     for dir in "$prds_root"/*/; do

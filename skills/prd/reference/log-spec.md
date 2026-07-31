@@ -3,7 +3,7 @@
 
 ## Overview
 
-The implementation log is a markdown file that documents completed work for a PRD. It lives at `.claude/prds/[prd_name]/log.md`.
+The implementation log is a markdown file that documents completed work for a PRD. It lives alongside the PRD at `[prd-root]/[prd_name]/log.md` (see `log_path` from `scripts/get-task.sh`).
 
 ## Structure
 

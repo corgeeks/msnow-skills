@@ -139,7 +139,8 @@ Notes:
   exist, `../prd/scripts/sync-umbrella.sh <umbrella>` derives the umbrella leaf
   statuses from child progress — never hand-edit them.
 - Choose child directory names in kebab-case; the umbrella leaf path is
-  `../<child-name>/PRD.md` (siblings under `.claude/prds/`).
+  `../<child-name>/PRD.md` (siblings under the resolved PRD root — see
+  `../prd/scripts/prd-root.sh`).
 
 ## Safety
 

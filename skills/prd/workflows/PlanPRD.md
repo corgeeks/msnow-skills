@@ -14,7 +14,7 @@ IMPORTANT: You MUST verify the following before proceeding.
      3. Ask which PRD to plan.
 
 2. **Verify the PRD exists**
-   - Check that `.claude/prds/[prd_name]/PRD.md` exists.
+   - Check that `<prd-root>/[prd_name]/PRD.md` exists (`<prd-root>` is `scripts/prd-root.sh`'s output — see SKILL.md, "Script & Path Resolution").
    - Verify it has the required structure (Objective, Motivation, Implementation Details, Discussion sections).
    - Run `scripts/umbrella-status.sh <prd-name>` if it's an umbrella PRD; otherwise run `scripts/task-status.sh <prd-name>` to understand the current state.
 

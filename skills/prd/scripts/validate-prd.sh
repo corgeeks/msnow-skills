@@ -15,12 +15,15 @@ SKILL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/lib/yq-compat.sh"
 # shellcheck source=lib/validate-lib.sh
 source "${SCRIPT_DIR}/lib/validate-lib.sh"
+# shellcheck source=lib/prd-root.sh
+source "${SCRIPT_DIR}/lib/prd-root.sh"
 
 usage() {
     echo "Usage: scripts/validate-prd.sh <prd-name>"
     echo ""
-    echo "Validates .claude/prds/<prd-name>/{tasks,research}.yaml against the schemas"
-    echo "and checks that defined/in-progress/completed tasks have spec files."
+    echo "Validates <prd-root>/<prd-name>/{tasks,research}.yaml against the schemas"
+    echo "(prd-root defaults to docs/prd — see scripts/prd-root.sh) and checks that"
+    echo "defined/in-progress/completed tasks have spec files."
     exit 1
 }
 
@@ -34,7 +37,7 @@ if ! command -v check-jsonschema &>/dev/null; then
 fi
 
 PRD_NAME="$1"
-PRD_DIR=".claude/prds/${PRD_NAME}"
+PRD_DIR="$(resolve_prd_root)/${PRD_NAME}"
 TASKS_FILE="${PRD_DIR}/tasks.yaml"
 RESEARCH_FILE="${PRD_DIR}/research.yaml"
 TASKS_SCHEMA="${SKILL_ROOT}/schemas/tasks.schema.json"

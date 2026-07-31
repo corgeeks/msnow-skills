@@ -23,7 +23,7 @@ Spec files are stored in the PRD's `specs/` directory.
 ### Parent PRD
 
 - **PRD**: [PRD Name]
-- **PRD Path**: `.claude/prds/[prd_name]/PRD.md`
+- **PRD Path**: `[prd-root]/[prd_name]/PRD.md` (see `prd_path` from `scripts/get-task.sh`)
 
 ### Related Tasks
 

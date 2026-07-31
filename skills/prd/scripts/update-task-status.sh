@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/yq-compat.sh"
 # shellcheck source=lib/umbrella-lib.sh
 source "${SCRIPT_DIR}/lib/umbrella-lib.sh"
+# shellcheck source=lib/prd-root.sh
+source "${SCRIPT_DIR}/lib/prd-root.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -18,7 +20,8 @@ usage() {
     echo "Updates the status of a task in a PRD's tasks.yaml file."
     echo ""
     echo "Arguments:"
-    echo "  prd-name    Name of the PRD (directory name under .claude/prds/)"
+    echo "  prd-name    Name of the PRD (directory name under the PRD root — see"
+    echo "              scripts/prd-root.sh)"
     echo "  task-name   Name of the task to update"
     echo "  new-status  New status (draft, defined, in-progress, or completed)"
     exit 1
@@ -32,7 +35,7 @@ PRD_NAME="$1"
 TASK_NAME="$2"
 NEW_STATUS="$3"
 
-TASKS_FILE=".claude/prds/${PRD_NAME}/tasks.yaml"
+TASKS_FILE="$(resolve_prd_root)/${PRD_NAME}/tasks.yaml"
 
 if [[ ! -f "$TASKS_FILE" ]]; then
     echo "Error: Tasks file not found: $TASKS_FILE" >&2

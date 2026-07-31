@@ -51,15 +51,26 @@ _[Full question text]_
 [User's answer]
 ```
 
-### 5. Create the PRD File
+### 5. Determine the PRD Root Directory
+
+Before writing anything, resolve where this project's PRDs live — run `scripts/prd-root.sh` (or, equivalently, `bash -c 'source scripts/lib/prd-root.sh && resolve_prd_root'`) from the skill directory. It returns one of:
+
+- **`.claude/prds`** — this project already has PRDs there from before this config existed. Use it as-is; do not ask.
+- **A path from `.claude/prd-root`** — a previous session already asked and recorded the answer. Use it as-is; do not ask.
+- **`docs/prd`** (the fallback, meaning neither of the above exists) — this is either a brand-new project for this skill, or truly has no PRDs yet. **Ask the user** where PRDs should live before creating the first one, e.g.: *"Where should PRDs live in this repo? Default: `docs/prd` — a plain, visible directory any teammate or tool can read, not hidden inside `.claude/`."* Accept their answer, or `docs/prd` if they have no preference.
+  - **Persist the answer** (even if it's the default) by writing it, and nothing else, to `.claude/prd-root` (create the `.claude/` directory if needed). This is a one-line project config file, not a PRD document — every later script call and future session then resolves the same root automatically, with no need to ask again.
+
+Call the resolved directory `<prd-root>` in the steps below.
+
+### 6. Create the PRD File
 
 Create a PRD file following the exact structure defined in the PRD specification (`reference/prd-spec.md`).
 
-**File location:** `.claude/prds/[prd_name]/PRD.md`
+**File location:** `<prd-root>/[prd_name]/PRD.md`
 
 Where `[prd_name]` is a kebab-case name derived from the objective (e.g., `user-authentication`, `dark-mode-toggle`).
 
-### 6. Fill Out Sections
+### 7. Fill Out Sections
 
 Focus on gathering information and filling out only:
 
@@ -70,7 +81,7 @@ Focus on gathering information and filling out only:
 | **Constraints** | Fill with any constraints mentioned by the user or that you identify |
 | **Discussion** | Fill with clarifying questions and their answers |
 
-### 7. Leave Placeholders
+### 8. Leave Placeholders
 
 The following sections should be left as placeholders for the planning workflow. Do NOT fill these out during PRD creation:
 
@@ -80,14 +91,14 @@ The following sections should be left as placeholders for the planning workflow.
 | **Relevant Guides** | `<To be determined during planning>` |
 | **Relevant Files** | `<To be determined during planning>` |
 
-### 8. Do NOT Create tasks.yaml
+### 9. Do NOT Create tasks.yaml
 
 Task generation is handled separately during the PlanPRD workflow. Creating tasks prematurely may lead to:
 - Incomplete task definitions
 - Tasks that don't align with discovered constraints
 - Missing research-informed decisions
 
-### 9. Validate and Confirm
+### 10. Validate and Confirm
 
 Before completing:
 

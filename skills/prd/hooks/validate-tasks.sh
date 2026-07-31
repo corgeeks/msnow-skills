@@ -16,6 +16,8 @@ SCHEMA_PATH="${SKILL_ROOT}/schemas/tasks.schema.json"
 source "${SKILL_ROOT}/scripts/lib/yq-compat.sh"
 # shellcheck source=../scripts/lib/validate-lib.sh
 source "${SKILL_ROOT}/scripts/lib/validate-lib.sh"
+# shellcheck source=../scripts/lib/prd-root.sh
+source "${SKILL_ROOT}/scripts/lib/prd-root.sh"
 
 # Missing tools should not block Claude — degrade gracefully.
 for dep in jq yq check-jsonschema; do
@@ -29,8 +31,10 @@ INPUT=$(cat)
 FILE_PATH=$(jq -r '.tool_input.file_path // empty' <<< "$INPUT")
 
 [[ -z "$FILE_PATH" ]] && exit 0
-# Only validate tasks.yaml files under a PRD directory
-[[ ! "$FILE_PATH" =~ \.claude/prds/.*/tasks\.yaml$ ]] && exit 0
+# Only validate tasks.yaml files under the resolved PRD root (see lib/prd-root.sh)
+PRD_ROOT="$(resolve_prd_root)"
+TASKS_PATTERN="${PRD_ROOT}/.*/tasks\.yaml\$"
+[[ ! "$FILE_PATH" =~ $TASKS_PATTERN ]] && exit 0
 [[ ! -f "$FILE_PATH" ]] && { echo "File not found: $FILE_PATH" >&2; exit 0; }
 
 echo "Validating: $FILE_PATH" >&2

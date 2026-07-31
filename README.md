@@ -51,7 +51,8 @@ Invoke the skills in conversation — describe what you want and Claude routes t
 right workflow:
 
 - **Create** — "create a PRD for user authentication" → gathers objective,
-  motivation, constraints; writes `.claude/prds/<name>/PRD.md`.
+  motivation, constraints; writes `docs/prd/<name>/PRD.md` (or wherever the
+  project has configured PRDs to live — see below).
 - **Plan** — "plan the user-authentication PRD" → deep analysis, codebase
   exploration, research (Exa), then a `tasks.yaml` of specced tasks. Decides
   whether the effort should become an **umbrella** of child PRDs.
@@ -67,16 +68,25 @@ or "do all". Child progress rolls up to the umbrella automatically.
 - **Break down** — "this PRD is too big, break it down" → analysis + a proposed
   decomposition; restructures `tasks.yaml` after you confirm.
 
-PRDs live under `.claude/prds/<name>/` in your project:
+PRDs live under `docs/prd/<name>/` in your project by default — a plain,
+visible directory, since PRDs are product documentation for the whole team,
+not Claude-specific state:
 
 ```
-.claude/prds/<name>/
+docs/prd/<name>/
 ├── PRD.md            # requirements document
 ├── tasks.yaml        # task definitions (validated against the schema)
 ├── research.yaml     # research questions (optional)
 ├── log.md            # implementation log + resume checkpoints
 └── specs/            # one spec file per leaf task
 ```
+
+The first time you create a PRD in a project, the skill asks where you'd like
+them stored (default `docs/prd`) and remembers your answer in
+`.claude/prd-root` for every later session. Projects that already have PRDs
+under the legacy `.claude/prds/` location keep working there automatically —
+nothing to migrate. See `skills/prd/reference/prd-spec.md` and
+`skills/prd/workflows/CreatePRD.md` for the full resolution order.
 
 The scripts are also usable directly (paths are relative to the installed skill
 directory):

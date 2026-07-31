@@ -23,6 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/yq-compat.sh"
 # shellcheck source=lib/umbrella-lib.sh
 source "${SCRIPT_DIR}/lib/umbrella-lib.sh"
+# shellcheck source=lib/prd-root.sh
+source "${SCRIPT_DIR}/lib/prd-root.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -40,7 +42,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 PRD_NAME="$1"
-PRD_DIR=".claude/prds/${PRD_NAME}"
+PRD_DIR="$(resolve_prd_root)/${PRD_NAME}"
 TASKS_FILE="${PRD_DIR}/tasks.yaml"
 
 if [[ ! -f "$TASKS_FILE" ]]; then

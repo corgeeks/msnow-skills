@@ -3,12 +3,12 @@
 
 ## Overview
 
-A PRD (Product Requirements Document) is a structured format for defining concrete objectives and enabling collaboration between users and Claude. PRDs are stored in `.claude/prds/[prd_name]/` directories within repository roots.
+A PRD (Product Requirements Document) is a structured format for defining concrete objectives and enabling collaboration between users and Claude. PRDs are stored in `[prd-root]/[prd_name]/` directories within repository roots, where `[prd-root]` defaults to `docs/prd` — a plain, visible location, since PRDs are product documentation meant to be read by any teammate or tool, not Claude-specific state hidden inside `.claude/`. A project can configure a different root (`.claude/prd-root`, resolved by `scripts/prd-root.sh`); see SKILL.md, "Script & Path Resolution", and `workflows/CreatePRD.md` for how it's chosen.
 
 ## Directory Structure
 
 ```
-.claude/prds/[prd-name]/
+[prd-root]/[prd-name]/
 ├── PRD.md           # Main PRD document
 ├── tasks.yaml       # Task definitions (created during planning)
 ├── research.yaml    # Research questions (optional)

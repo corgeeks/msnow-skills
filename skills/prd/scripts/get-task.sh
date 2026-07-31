@@ -5,6 +5,8 @@ set -euo pipefail
 
 # shellcheck source=lib/yq-compat.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/yq-compat.sh"
+# shellcheck source=lib/prd-root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/prd-root.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -22,7 +24,7 @@ fi
 
 PRD_NAME="$1"
 TASK_NAME="$2"
-PRD_DIR=".claude/prds/${PRD_NAME}"
+PRD_DIR="$(resolve_prd_root)/${PRD_NAME}"
 TASKS_FILE="${PRD_DIR}/tasks.yaml"
 PRD_FILE="${PRD_DIR}/PRD.md"
 LOG_FILE="${PRD_DIR}/log.md"

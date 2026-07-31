@@ -5,6 +5,17 @@ The following scripts are available in the `scripts/` directory relative to the 
 
 **YAML tooling:** every script works with either the Go (mikefarah) or Python (kislyuk) `yq` — `scripts/lib/yq-compat.sh` detects which is installed and adapts. `jq` is always required. (Python yq strips comments from `tasks.yaml` on status updates; see DEPENDENCIES.md.)
 
+## PRD Root
+
+### `scripts/prd-root.sh`
+
+Prints the resolved PRD root directory for the current project (relative path, e.g. `docs/prd`). Every other script resolves it the same way internally — see `scripts/lib/prd-root.sh` and SKILL.md, "Script & Path Resolution" — so you rarely need to call this directly; it's mainly for the CreatePRD "Determine the PRD Root Directory" step and for the sibling **breakdown** skill.
+
+```bash
+scripts/prd-root.sh
+# Output: docs/prd
+```
+
 ## PRD Management
 
 ### `scripts/list-prds.sh`
@@ -52,12 +63,12 @@ scripts/get-task.sh my-feature "Implement API endpoint"
 #   "description": "Create the login endpoint",
 #   "status": "defined",
 #   "spec": "specs/implement-api-endpoint.md",
-#   "spec_path": ".claude/prds/my-feature/specs/implement-api-endpoint.md",
+#   "spec_path": "docs/prd/my-feature/specs/implement-api-endpoint.md",
 #   "spec_exists": true,
 #   "parent": null,
 #   "prd_name": "my-feature",
-#   "prd_path": ".claude/prds/my-feature/PRD.md",
-#   "log_path": ".claude/prds/my-feature/log.md",
+#   "prd_path": "docs/prd/my-feature/PRD.md",
+#   "log_path": "docs/prd/my-feature/log.md",
 #   "log_exists": true,
 #   "found": true
 # }

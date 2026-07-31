@@ -5,6 +5,8 @@ set -euo pipefail
 
 # shellcheck source=lib/yq-compat.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/yq-compat.sh"
+# shellcheck source=lib/prd-root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/prd-root.sh"
 
 # Check dependencies (supports either Go or Python yq)
 require_yaml_tools || exit 1
@@ -21,7 +23,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 PRD_NAME="$1"
-RESEARCH_FILE=".claude/prds/${PRD_NAME}/research.yaml"
+RESEARCH_FILE="$(resolve_prd_root)/${PRD_NAME}/research.yaml"
 
 if [[ ! -f "$RESEARCH_FILE" ]]; then
     # No research file - return zeros
