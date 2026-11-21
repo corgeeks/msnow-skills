@@ -16,6 +16,13 @@ Spec files are stored in the PRD's `specs/` directory.
 
 <A clear, actionable statement of what this task should accomplish. Be specific about the expected outcome.>
 
+## Suggested Model
+
+<Optional. Tier — Heavy | Standard | Light — plus a concrete model name if the
+user named one for this tier, and a one-line reason. See
+`reference/model-selection.md`. Omit this section entirely if the user's
+harness doesn't support per-task model selection, or hasn't stated a roster.>
+
 ## Context
 
 <Background information the subagent needs to understand why this task exists and how it fits into the larger PRD objective.>
@@ -98,3 +105,5 @@ Spec files are stored in the PRD's `specs/` directory.
 4. **Out of Scope is critical** - Explicitly defining boundaries prevents scope creep
 
 5. **Testing requirements enable verification** - Include how to validate the implementation works
+
+6. **Suggested Model is optional annotation** - Include it only when the user has told you what's available in their harness; never invent model names, and never let the tier substitute for writing a thorough spec

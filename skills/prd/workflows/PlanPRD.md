@@ -298,6 +298,16 @@ If the effort is large and naturally decomposes into slices that can be planned 
 
 Otherwise, generate ordinary implementation tasks.
 
+**Determine model routing (once per planning session).** If a multi-model
+harness (Codex CLI, Cursor, opencode, Claude Code, etc.) is in play and you
+don't already know from this conversation, ask the user which harness will
+implement this PRD and which models it offers them — see
+`reference/model-selection.md` for the tier framework and the axes to weigh.
+Record the answer as a Discussion Q&A on the PRD (on the umbrella PRD if
+applicable, so children inherit it without re-asking). Skip entirely if the
+user has no per-task model choice or would rather not specify one — Suggested
+Model is optional annotation on tasks, never a requirement.
+
 **Update PRD.md** before generating tasks:
 - Complete the Architecture section with design decisions
 - Fill in Relevant Guides with discovered documentation
