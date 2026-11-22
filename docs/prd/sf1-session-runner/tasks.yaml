@@ -1,0 +1,16 @@
+- name: Session runner building blocks
+  description: The omp RPC session runner (with its fake) and the worktree manager
+    are independent and built in parallel.
+  subtasks:
+    - name: omp RPC session runner and fake
+      description: src/daemon/omp.ts runSession/killAllSessions, test/fakes/fake-omp.ts,
+        deterministic tests for every SessionStatus, opt-in live smoke test, and main.ts
+        shutdown-hook wiring.
+      status: defined
+      spec: specs/omp-session-runner.md
+    - name: Worktree manager
+      description: 'src/daemon/worktrees.ts: create/remove/prune/list worktrees, commitAll,
+        headSha, commitsAhead, isClean, resetHard; tests over temp repos with a bare
+        origin.'
+      status: defined
+      spec: specs/worktree-manager.md

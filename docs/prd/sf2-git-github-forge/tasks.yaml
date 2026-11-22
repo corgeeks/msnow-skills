@@ -1,0 +1,19 @@
+- name: Git exec helper and queue
+  description: 'src/daemon/git.ts: git() exec wrapper with GitError, and the strict
+    FIFO Queue; tests.'
+  status: defined
+  spec: specs/git-helper-queue.md
+- name: Forge and state committer
+  description: Built in parallel on top of git.ts.
+  subtasks:
+    - name: GitHub forge and fake gh
+      description: src/daemon/forge.ts (main worktree, fetch, syncMain, pushBranch,
+        PR lifecycle) and test/fakes/fake-gh.ts; tests against a bare origin.
+      status: defined
+      spec: specs/github-forge.md
+    - name: Debounced state committer
+      description: 'src/daemon/state-commit.ts: milestone detection from bus events,
+        debounce, snapshot+commit+push HEAD:main with one non-fast-forward retry;
+        main.ts wiring; tests.'
+      status: defined
+      spec: specs/state-committer.md
