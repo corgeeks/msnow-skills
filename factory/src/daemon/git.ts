@@ -1,5 +1,8 @@
 import { execFileSync } from 'node:child_process';
 
+// Daemon identity for every factory-made commit; unsigned (global signers block unattended).
+export const DAEMON_COMMIT_FLAGS = ['-c', 'user.name=factory', '-c', 'user.email=factory@localhost', '-c', 'commit.gpgsign=false'];
+
 export class GitError extends Error {
   stderr: string;
   args: string[];
