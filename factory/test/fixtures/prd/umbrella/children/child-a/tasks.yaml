@@ -1,0 +1,8 @@
+- name: A1
+  description: a1
+  spec: specs/a1.md
+  status: defined
+- name: A2
+  description: a2
+  spec: specs/a2.md
+  status: defined

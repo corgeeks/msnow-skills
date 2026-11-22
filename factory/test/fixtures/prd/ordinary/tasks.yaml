@@ -1,0 +1,19 @@
+- name: A
+  description: first
+  spec: specs/a.md
+  status: defined
+- name: B
+  description: group
+  subtasks:
+    - name: B1
+      description: b one
+      spec: specs/b1.md
+      status: completed
+    - name: B2
+      description: b two
+      spec: specs/b2.md
+      status: draft
+- name: C
+  description: last
+  spec: specs/c.md
+  status: in-progress

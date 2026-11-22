@@ -1,0 +1,4 @@
+- name: B1
+  description: b1
+  spec: specs/b1.md
+  status: defined
