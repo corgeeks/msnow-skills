@@ -1,11 +1,8 @@
 import { mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { git } from './git.ts';
+import { DAEMON_COMMIT_FLAGS, git } from './git.ts';
 
 export interface Worktree { path: string; branch: string }
-
-// Daemon identity, passed per command; signing off because a global signer (1Password SSH) hangs unattended.
-const COMMIT_FLAGS = ['-c', 'user.name=factory', '-c', 'user.email=factory@localhost', '-c', 'commit.gpgsign=false'];
 
 const dirOf = (root: string) => join(resolve(root), '.factory', 'worktrees');
 
@@ -55,7 +52,7 @@ export function listWorktrees(root: string): Array<Worktree & { locked: boolean;
 export function commitAll(path: string, message: string): string | null {
   git(path, ['add', '-A']);
   if (git(path, ['diff', '--cached', '--name-only']) === '') return null;
-  git(path, [...COMMIT_FLAGS, 'commit', '-m', message]);
+  git(path, [...DAEMON_COMMIT_FLAGS, 'commit', '-m', message]);
   return headSha(path);
 }
 
