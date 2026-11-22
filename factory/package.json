@@ -1,0 +1,17 @@
+{
+  "name": "factory",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15"
+  },
+  "scripts": {
+    "test": "node --test 'src/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json",
+    "daemon": "node src/daemon/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

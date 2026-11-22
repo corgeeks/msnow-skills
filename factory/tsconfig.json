@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "esnext",
+    "module": "nodenext",
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
