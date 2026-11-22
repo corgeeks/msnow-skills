@@ -6,11 +6,11 @@
       description: src/daemon/omp.ts runSession/killAllSessions, test/fakes/fake-omp.ts,
         deterministic tests for every SessionStatus, opt-in live smoke test, and main.ts
         shutdown-hook wiring.
-      status: defined
+      status: completed
       spec: specs/omp-session-runner.md
     - name: Worktree manager
       description: 'src/daemon/worktrees.ts: create/remove/prune/list worktrees, commitAll,
         headSha, commitsAhead, isClean, resetHard; tests over temp repos with a bare
         origin.'
-      status: defined
+      status: completed
       spec: specs/worktree-manager.md

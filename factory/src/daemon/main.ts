@@ -5,7 +5,8 @@ import { loadConfig } from '../shared/config.ts';
 import { createBus } from './bus.ts';
 import { openDb } from './db.ts';
 import { createApiServer } from './http.ts';
-import { acquireInstanceLock, installSignalHandlers } from './lifecycle.ts';
+import { acquireInstanceLock, installSignalHandlers, onShutdown } from './lifecycle.ts';
+import { killAllSessions } from './omp.ts';
 import { resolvePaths } from './paths.ts';
 import { createStore } from './store.ts';
 
@@ -29,5 +30,6 @@ try {
   db.close();
   process.exit(1);
 }
+onShutdown(() => killAllSessions());
 installSignalHandlers({ server, db });
 console.log(`factory daemon listening on http://127.0.0.1:${(server.address() as AddressInfo).port} (root ${paths.root})`);
