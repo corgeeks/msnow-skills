@@ -1,5 +1,21 @@
 # Implementation Log
 
+## 2026-11-22T23:55:00 - Work-item tree and item detail views
+
+**Status**: Completed
+
+**Summary**: Replaced the `/` and `/items/$id` shells. `/` has hand-written `validateSearch`, URL-only filters (native selects plus `Input`), a tree that keeps ancestors (non-matching ones muted), and live refetch. `/items/$id` has the header, a definition list, a plain-text body, deps/dependents/children lists, a runs table, and "Item not found" handling.
+
+**Changes Made**:
+- `factory/ui/src/routes/index.tsx` - Modified: search validation, filters, loading and error states
+- `factory/ui/src/routes/items.$id.tsx` - Modified: item detail
+- `factory/ui/src/components/items/item-tree.tsx` - Created: tree build, filter, and table
+- `factory/ui/src/components/items/item-list.tsx` - Created: `#id` + link + badge list
+
+**Notes**: Browser-checked on ui-seed: nesting and indent; the status, type, `#id`, text, and bogus-status filters; `?q=42` shows "No items match"; select changes use replace (history length unchanged); live item create and t2→done (t3 Blocked by → `—`); detail pages for t2, b1, and grp; 404 and `abc`; the reopen refetch drops "Live item". `routeTree.gen.ts` is unchanged, and `app-sidebar.tsx` needed no change. The shared headless Chromium sometimes stalled `goto` on this host, apparently from the per-host connection limit with SSE tabs open. A fresh tab fixed it, so the cause is the environment, not the app.
+
+---
+
 ## 2026-11-22T23:45:00 - UI scaffold, design system, and data layer
 
 **Status**: Completed
