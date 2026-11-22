@@ -9,9 +9,9 @@
   subtasks:
     - name: Work-item tree and item detail views
       description: Routes / and /items/$id with type/status/q filters and live refetch.
-      status: defined
+      status: completed
       spec: specs/ui-items-views.md
     - name: Run detail and gates views
       description: Routes /runs/$id (node timeline, gates, live activity) and /gates.
-      status: defined
+      status: completed
       spec: specs/ui-runs-gates-views.md

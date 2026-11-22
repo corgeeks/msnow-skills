@@ -15,32 +15,32 @@
         wall-clock abort, cost_cap handling, process-group kill. Worktree manager:
         add --lock, remove, prune, resume into a preserved worktree.'
       spec: ../sf1-session-runner/PRD.md
-      status: defined
+      status: completed
     - name: sf2 — Git and GitHub forge
       description: Daemon worktree .factory/main at detached origin/main; single FIFO
         git queue; DB snapshot commit + push HEAD:main; branch push; gh pr create/comment/view/merge
         --squash --match-head-commit; post-merge worktree and branch cleanup.
       spec: ../sf2-git-github-forge/PRD.md
-      status: defined
+      status: completed
     - name: sf3 — CLI and PRD import
       description: factory CLI (daemon, import, add, status, approve, reject) as an
         HTTP client; importer mapping tasks.yaml (ordinary and umbrella) + specs onto
         work items and dependency edges.
       spec: ../sf3-cli-and-import/PRD.md
-      status: defined
+      status: completed
     - name: sf4 — Read-only UI
       description: 'Vite 8 + React UI served by the daemon: work-item tree grouped
         by type, run/node status, open gates, live updates over SSE with Last-Event-ID
         replay. No mutations.'
       spec: ../sf4-readonly-ui/PRD.md
-      status: defined
+      status: completed
 - name: L2 · sf5 — Loop engine
   description: 'Scheduler for the hard-coded `change` template: ready-item dispatch,
     build → test_cmd → cross-family review → PR → merge gate → merge → retro; attempt/round
     limits, failure gates, restart recovery, executor and reviewer prompts. Integrates
     sf1 and sf2.'
   spec: ../sf5-loop-engine/PRD.md
-  status: defined
+  status: in-progress
 - name: L3 · sf6 — Self-hosting cutover
   description: Import the remaining software-factory backlog (L4) into the factory,
     run one real loop on the factory itself end-to-end, document the factory in README,

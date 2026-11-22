@@ -1,5 +1,20 @@
 # Implementation Log
 
+## 2026-11-22T23:58:00 - Run detail and gates views
+
+**Status**: Completed
+
+**Summary**: Replaced the `/runs/$id` and `/gates` shells with read-only live views: run header card, node timeline, shared `GateCard` with selectable approve/reject commands, and a Live activity panel (newest first, capped at 200).
+
+**Changes Made**:
+- `factory/ui/src/routes/runs.$id.tsx` - Modified: run detail page, "Run not found" for bad id/404
+- `factory/ui/src/routes/gates.tsx` - Modified: Open (oldest first) / Recently closed (first 20) with item+run links
+- `factory/ui/src/components/runs/{gate-card,node-timeline,activity-panel}.tsx` - Created
+
+**Notes**: Browser-checked on ui-seed (port 7317): R2 header/PR anchor/timeline order, activity filtered (no R4 lines) and holds at 200; R1/R3/R4 gates; not-found for 999999 and x; live approve of g4 updates /gates and /runs/4 in two tabs without reload; seed restart restores g4 open and resumes activity. `routeTree.gen.ts` unchanged; no `method:`/clipboard in ui/src. `npm test` hangs in `src/daemon/lifecycle.test.ts` (not touched by this task); every other test file passes (78/78).
+
+---
+
 ## 2026-11-22T23:55:00 - Work-item tree and item detail views
 
 **Status**: Completed
