@@ -149,6 +149,7 @@ flowchart LR
 - Executors run with `--approval-mode yolo --no-ui` (approval prompts fail closed instead of hanging), `--session-dir .factory/sessions`, and `--model` from the role map. They are spawned `detached`, so a process-group kill reaches grandchildren.
 - `gh`: always pass `--title` and `--body-file` (non-interactive), and merge with `gh pr merge <n> --squash --match-head-commit <sha>`. **Never** use `--delete-branch`, which has worktree-removal bugs (cli/cli#14537); the daemon removes the worktree and branch after `state == MERGED`. The repo has no CI, and `gh pr checks` exits 1 when no checks exist, so read `gh pr view --json statusCheckRollup,mergeStateStatus,headRefOid` instead.
 - git: create worktrees with `--lock`, run `git worktree prune` on startup, and only the daemon fetches. Linked worktrees share refs, packed-refs, and config, so contention is avoided by funnelling those operations through the one git queue.
+- Signing: factory commits are **unsigned**. Every daemon commit passes `DAEMON_COMMIT_FLAGS` (`git.ts`), which sets the factory identity and `-c commit.gpgsign=false`, because the user's global 1Password SSH signer hangs or fails when unattended. Executor branch commits reach `main` only through GitHub's squash merge, which GitHub signs. Only the `factory: state` commits land on `main` unsigned.
 
 **Learn**
 - When a loop closes, a retro step writes a structured record to the DB: failures, review findings, rework count, cost, and time. It also proposes edits to committed knowledge: ADRs, decisions, conventions, loop templates, and agent prompts. The human approves or rejects the proposals at a gate. The planner reads this knowledge when it plans.
@@ -384,6 +385,12 @@ Yes, as transient tool-call lines over SSE (`event: activity`, no `id`). They ar
 _Which UI kit and router?_
 
 shadcn/ui, whose MCP is registered for agent sessions through `.mcp.json`, with TanStack Router on file-based routes. `factory/ui` is its own package with devDependencies only. Note: TanStack Router uses the History API; the Navigation API (Baseline 2026, newly available) is not used directly.
+
+### Commit signing (WorkPRD, L1)
+
+_The user's global config signs commits through 1Password SSH, which fails unattended. How should factory commits, and the v0 build commits, be signed?_
+
+Factory commits are unsigned (`commit.gpgsign=false` through `DAEMON_COMMIT_FLAGS`). The v0 build commits are unsigned too, limited to the `feat/software-factory` branch by `includeIf "onbranch:feat/software-factory"` in `.git/config` pointing at `.git/unsigned-feature-branch.inc`. Remove that include after the branch is merged.
 
 ### References
 

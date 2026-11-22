@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { once } from 'node:events';
-import { tmpdir } from 'node:os';
+import { makeRepos } from '../../test/fixtures/git-repos.ts';
+import { git } from './git.ts';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { AddressInfo } from 'node:net';
@@ -39,12 +40,6 @@ test('hooks run in reverse; hung hook is cut at graceMs', async () => {
   assert.ok(!server.listening);
 });
 
-function tmpRepo(): string {
-  const root = mkdtempSync(join(tmpdir(), 'factory-'));
-  execFileSync('git', ['init', '-q', root]);
-  return root;
-}
-
 async function startDaemon(root: string) {
   const child = spawn(process.execPath, [MAIN, '--root', root, '--port', '0'], { stdio: ['ignore', 'pipe', 'inherit'] });
   const [line] = (await once(createInterface({ input: child.stdout! }), 'line')) as [string];
@@ -54,7 +49,7 @@ async function startDaemon(root: string) {
 }
 
 test('smoke: daemon starts, serves health, exits 0 on SIGTERM', async () => {
-  const root = tmpRepo();
+  const { root, origin } = makeRepos(); // daemon needs an `origin` to prepare `.factory/main`
   const { child, base } = await startDaemon(root);
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.equal(health.ok, true);
@@ -62,10 +57,11 @@ test('smoke: daemon starts, serves health, exits 0 on SIGTERM', async () => {
   const [code] = await once(child, 'exit');
   assert.equal(code, 0);
   assert.ok(existsSync(join(root, '.factory/live/factory.db')));
+  assert.equal(git(origin, ['log', '-1', '--format=%s', 'main']), 'factory: state (shutdown)');
 });
 
 test('seeds live DB from committed DB', async () => {
-  const root = tmpRepo();
+  const { root } = makeRepos();
   mkdirSync(join(root, '.factory'));
   const db = openDb(join(root, '.factory/factory.db'));
   createStore(db, createBus()).createItem({ title: 'seeded' });

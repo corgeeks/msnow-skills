@@ -4,10 +4,13 @@ import { parseArgs } from 'node:util';
 import { loadConfig } from '../shared/config.ts';
 import { createBus } from './bus.ts';
 import { openDb } from './db.ts';
+import { createForge } from './forge.ts';
+import { createQueue } from './git.ts';
 import { createApiServer } from './http.ts';
 import { acquireInstanceLock, installSignalHandlers, onShutdown } from './lifecycle.ts';
 import { killAllSessions } from './omp.ts';
 import { resolvePaths } from './paths.ts';
+import { createStateCommitter } from './state-commit.ts';
 import { createStore } from './store.ts';
 
 const { values } = parseArgs({ options: { root: { type: 'string' }, port: { type: 'string' } } });
@@ -23,6 +26,7 @@ const bus = createBus();
 const store = createStore(db, bus);
 const server = createApiServer({ store, bus, uiDir: paths.uiDir });
 
+// Take the instance lock before touching shared state: a losing second daemon must not reset .factory/main.
 try {
   await acquireInstanceLock(server, port);
 } catch (e) {
@@ -30,6 +34,22 @@ try {
   db.close();
   process.exit(1);
 }
+
+const queue = createQueue();
+const forge = createForge({ root: paths.root, mainWorktree: paths.mainWorktree, queue });
+try {
+  await forge.ensureMainWorktree();
+} catch (e) {
+  console.error(`factory: cannot prepare ${paths.mainWorktree}: ${(e as Error).message}`);
+  server.close();
+  db.close();
+  process.exit(1);
+}
+const committer = createStateCommitter({
+  db, bus, queue, mainWorktree: paths.mainWorktree,
+  prefix: config.git.stateCommitPrefix, debounceSec: config.git.stateCommitDebounceSec,
+});
+onShutdown(async () => { committer.stop(); await committer.flush('shutdown'); });
 onShutdown(() => killAllSessions());
 installSignalHandlers({ server, db });
 console.log(`factory daemon listening on http://127.0.0.1:${(server.address() as AddressInfo).port} (root ${paths.root})`);

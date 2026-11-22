@@ -1,5 +1,21 @@
 # Implementation Log
 
+## 2026-11-22T19:00:00 - Debounced state committer
+
+**Status**: Completed
+
+**Summary**: Added `createStateCommitter` (milestone filter, unref'd debounce timer, single queued flush job that syncs `.factory/main` with `git()` directly, snapshots and integrity-checks the DB, commits unsigned via `DAEMON_COMMIT_FLAGS`, pushes `HEAD:main`, one retry on a racing remote). Wired queue, forge, `ensureMainWorktree`, committer and shutdown flush into `main.ts`.
+
+**Changes Made**:
+- `factory/src/daemon/state-commit.ts` - Created: createStateCommitter
+- `factory/src/daemon/state-commit.test.ts` - Created: debounce, filter, forced, nothing staged, retry, double failure, truncation, stop
+- `factory/src/daemon/main.ts` - Modified: queue/forge/committer wiring, startup worktree, shutdown flush
+- `factory/src/daemon/lifecycle.test.ts` - Modified: daemon tests use `makeRepos()` (startup now needs `origin`); smoke test asserts the `shutdown` state commit
+
+**Notes**: Deviations: (1) retry regex adds `incorrect old value`. A remote that moves during the push (the spec's pre-push-hook race) gets `[remote rejected] … (incorrect old value provided)`, which the spec regex misses. (2) On failure, a `flush(reason)` reason is kept in `pending` with the milestones, so "the batch stays pending" includes it. Startup runs `ensureMainWorktree` before `acquireInstanceLock`, as the spec orders, so a second daemon resets `.factory/main` before it exits.
+
+---
+
 ## 2026-11-22T18:00:00 - GitHub forge and fake gh
 
 **Status**: Completed
