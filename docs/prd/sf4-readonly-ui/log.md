@@ -1,0 +1,23 @@
+# Implementation Log
+
+## 2026-11-22T23:45:00 - UI scaffold, design system, and data layer
+
+**Status**: Completed
+
+**Summary**: Created `factory/ui` (Vite 8, React 19, Tailwind v4, shadcn base-nova, TanStack file routing) with sidebar layout, route shells, typed GET data layer, shared-EventSource hooks, StatusBadge/format helpers, the `build:ui` script, root shadcn MCP entry, and the `factory/test/ui-seed.ts` dev seed server.
+
+**Changes Made**:
+- `factory/ui/package.json`, `package-lock.json` - Created: devDependencies-only package
+- `factory/ui/vite.config.ts`, `tsconfig.json`, `components.json`, `index.html` - Created: toolchain, theme script
+- `factory/ui/src/main.tsx`, `src/index.css`, `src/routeTree.gen.ts` - Created
+- `factory/ui/src/routes/{__root,index,items.$id,runs.$id,gates}.tsx` - Created: layout + shells
+- `factory/ui/src/components/ui/**`, `src/hooks/use-mobile.ts`, `src/lib/utils.ts` - Created: shadcn generated
+- `factory/ui/src/components/{app-sidebar,status-badge}.tsx` - Created
+- `factory/ui/src/lib/{api,events,format}.ts` - Created: data layer
+- `factory/package.json` - Modified: `build:ui` script
+- `.mcp.json` - Created: shadcn MCP with `cwd: factory/ui`
+- `factory/test/ui-seed.ts` - Created: seed server
+
+**Notes**: shadcn CLI 4.x has no `base-nova` preset name; `init -t vite -b base -p nova` yields `style: "base-nova"`. Init also added `@fontsource-variable/geist` (moved to devDependencies with the rest). Root layout wraps in `TooltipProvider` (required by sidebar tooltips). Browser-checked on the seed: sidebar active state, hard refresh of /gates and /items/1, not-found, dark mode follows OS. `/events` opens lazily, so shells make no request until views use `useResource`. `npm test` failures were only in sibling-owned `src/cli/main.test.ts` and `src/daemon/forge.test.ts`; MCP session check not run from this agent.
+
+---
