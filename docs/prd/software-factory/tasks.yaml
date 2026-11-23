@@ -1,0 +1,86 @@
+- name: L0 · sf0 — Factory core
+  description: Package scaffold (factory/, Node >=24.15, type stripping, node:test),
+    config (.factory/config.json), node:sqlite schema + migrations + CAS store, VACUUM
+    INTO snapshot, daemon skeleton (port-bind single instance, graceful shutdown),
+    HTTP JSON API for items/deps/runs/gates/events and the SSE /events stream. Gates
+    every other slice's data shapes.
+  spec: ../sf0-factory-core/PRD.md
+  status: completed
+- name: L1 · Adapters and surfaces
+  description: Independent slices that depend only on sf0's store and API contract.
+  subtasks:
+    - name: sf1 — Session runner
+      description: 'omp --mode rpc client: spawn detached in a worktree, ready handshake,
+        prompt, prompt_result outcome, event capture, get_session_stats cost, daemon-owned
+        wall-clock abort, cost_cap handling, process-group kill. Worktree manager:
+        add --lock, remove, prune, resume into a preserved worktree.'
+      spec: ../sf1-session-runner/PRD.md
+      status: completed
+    - name: sf2 — Git and GitHub forge
+      description: Daemon worktree .factory/main at detached origin/main; single FIFO
+        git queue; DB snapshot commit + push HEAD:main; branch push; gh pr create/comment/view/merge
+        --squash --match-head-commit; post-merge worktree and branch cleanup.
+      spec: ../sf2-git-github-forge/PRD.md
+      status: completed
+    - name: sf3 — CLI and PRD import
+      description: factory CLI (daemon, import, add, status, approve, reject) as an
+        HTTP client; importer mapping tasks.yaml (ordinary and umbrella) + specs onto
+        work items and dependency edges.
+      spec: ../sf3-cli-and-import/PRD.md
+      status: completed
+    - name: sf4 — Read-only UI
+      description: 'Vite 8 + React UI served by the daemon: work-item tree grouped
+        by type, run/node status, open gates, live updates over SSE with Last-Event-ID
+        replay. No mutations.'
+      spec: ../sf4-readonly-ui/PRD.md
+      status: completed
+- name: L2 · sf5 — Loop engine
+  description: 'Scheduler for the hard-coded `change` template: ready-item dispatch,
+    build → test_cmd → cross-family review → PR → merge gate → merge → retro; attempt/round
+    limits, failure gates, restart recovery, executor and reviewer prompts. Integrates
+    sf1 and sf2.'
+  spec: ../sf5-loop-engine/PRD.md
+  status: completed
+- name: L3 · sf6 — Self-hosting cutover
+  description: Import the remaining software-factory backlog (L4) into the factory,
+    run one real loop on the factory itself end-to-end, document the factory in README,
+    and retire YAML PRDs for this repo.
+  plan_after_prior: true
+  spec: ../sf6-self-hosting-cutover/PRD.md
+  status: in-progress
+- name: L4 · v1 backlog (imported into the factory; never planned in YAML)
+  description: v1 capabilities. Stub child PRDs are the import source for sf6; the
+    factory plans and builds them.
+  plan_after_prior: true
+  subtasks:
+    - name: sf7 — Review UI and inbox
+      description: 'Full UI: DAG view, diffs, gate approve/reject from the UI, inbox
+        of items needing the human.'
+      spec: ../sf7-review-ui-inbox/PRD.md
+      status: draft
+    - name: sf8 — Loop template library and planner composition
+      description: Template library (e.g. dependency-update, feature, research, decision,
+        design); planner composes and nests templates; prd skill writes items straight
+        to the daemon; plan gate.
+      spec: ../sf8-templates-and-planner/PRD.md
+      status: draft
+    - name: sf9 — Nested loops and non-code artifacts
+      description: Loops spawn child loops whose outputs are decisions/ADRs, docs,
+        wireframes; artifacts as first-class outputs feeding the parent.
+      spec: ../sf9-nested-loops-artifacts/PRD.md
+      status: draft
+    - name: sf10 — Learn gate
+      description: Retro proposes edits to committed knowledge (ADRs, conventions,
+        templates, prompts) behind an approval gate; planner reads the knowledge.
+      spec: ../sf10-learn-gate/PRD.md
+      status: draft
+    - name: sf11 — Code intelligence
+      description: graphify and codebase-memory-mcp wired into planner context and
+        reviewer impact analysis.
+      spec: ../sf11-code-intelligence/PRD.md
+      status: draft
+    - name: sf12 — Configurable gates
+      description: Per-node gate configuration with defaults (plan, merge, reviewer
+        disagreement, repeated check failure).
+      spec: ../sf12-configurable-gates/PRD.md
+      status: draft

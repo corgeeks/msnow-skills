@@ -1,0 +1,20 @@
+- name: L0
+  description: level zero
+  spec: children/child-a/PRD.md
+  status: completed
+- name: L1
+  description: level one
+  subtasks:
+    - name: B
+      description: b
+      spec: children/child-b/PRD.md
+      status: defined
+    - name: Stub
+      description: stub
+      spec: children/child-stub/PRD.md
+      status: draft
+- name: L2
+  description: level two
+  plan_after_prior: true
+  spec: children/child-late/PRD.md
+  status: draft

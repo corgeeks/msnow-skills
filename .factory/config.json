@@ -1,0 +1,12 @@
+{
+  "port": 7317,
+  "roles": {
+    "planner": "anthropic/claude-opus-5-5",
+    "executor": { "heavy": "anthropic/claude-opus-5-5", "standard": "anthropic/claude-sonnet-5-5", "light": "anthropic/claude-haiku-5-5" },
+    "reviewer": { "anthropic": "openai-codex/gpt-6.2-sol", "openai-codex": "anthropic/claude-opus-5-5" }
+  },
+  "caps": { "sessionMinutes": 30, "sessionCostUsd": 5 },
+  "loop": { "maxBuildAttempts": 3, "maxReviewRounds": 2, "maxParallel": 2 },
+  "git": { "stateCommitPrefix": "factory: state", "stateCommitDebounceSec": 60 },
+  "defaultTestCmd": "npm test --prefix factory"
+}

@@ -1,0 +1,27 @@
+- name: Prompts, verdicts, and retro
+  description: Pure building blocks built in parallel.
+  subtasks:
+    - name: Executor and reviewer prompts
+      description: prompts/executor.md (ported from prd-worker.md), prompts/reviewer.md,
+        prompts.ts buildExecutorPrompt/buildReviewerPrompt/parseVerdict; tests.
+      status: completed
+      spec: specs/prompts-and-verdicts.md
+    - name: Retro computation
+      description: retro.ts computeRetro from run + node_runs + findings; tests.
+      status: completed
+      spec: specs/retro-computation.md
+- name: change loop state machine
+  description: 'template-change.ts runChange: re-entrant build → test → review → pr
+    → merge_gate → merge → retro with limits, gates, containment; tests with fake-omp/fake-gh.'
+  status: completed
+  spec: specs/change-state-machine.md
+- name: Engine scheduler, recovery, and wiring
+  description: engine.ts dispatch within maxParallel, container roll-up, gate-closed
+    resume, restart recovery; main.ts wiring; tests.
+  status: completed
+  spec: specs/engine-scheduler.md
+- name: End-to-end loop tests
+  description: 'e2e.test.ts: happy path to merged + state commit, test-fail retry,
+    review rework, exhausted failure gate, merge reject, restart mid-run.'
+  status: completed
+  spec: specs/e2e-loop-tests.md

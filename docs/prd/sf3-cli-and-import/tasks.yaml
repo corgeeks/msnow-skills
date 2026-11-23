@@ -1,0 +1,16 @@
+- name: CLI and importer
+  description: The importer and the CLI are independent and built in parallel; the
+    CLI's import command calls buildImportBatch by its documented signature.
+  subtasks:
+    - name: PRD importer
+      description: src/cli/import.ts buildImportBatch with fixtures for ordinary,
+        umbrella, plan_after_prior and stub-child PRDs; dependency and status mapping;
+        tests.
+      status: completed
+      spec: specs/prd-importer.md
+    - name: factory CLI
+      description: 'src/cli/main.ts + client.ts: daemon, status, show, add, import,
+        start, approve, reject; bin + npm link verification; tests against an in-process
+        daemon.'
+      status: completed
+      spec: specs/factory-cli.md

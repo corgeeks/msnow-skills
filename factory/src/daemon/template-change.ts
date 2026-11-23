@@ -1,0 +1,370 @@
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { git } from './git.ts';
+import { buildExecutorPrompt, buildReviewerPrompt, parseVerdict, type Verdict } from './prompts.ts';
+import { computeRetro } from './retro.ts';
+import { ConflictError, type NodeRunPatch, type Store } from './store.ts';
+import type { Bus } from './bus.ts';
+import type { Forge } from './forge.ts';
+import type { runSession } from './omp.ts';
+import type * as Worktrees from './worktrees.ts';
+import type { Config, Gate, ItemStatus, NodeRun, Run, RunStatus, WorkItem } from '../shared/types.ts';
+
+export interface ChangeContext {
+  runId: number; stopped: () => boolean;
+  store: Store; bus: Bus; config: Config; paths: { root: string; sessionsDir: string };
+  runSession: typeof runSession;
+  worktrees: Pick<typeof Worktrees, 'commitAll' | 'commitsAhead' | 'headSha' | 'isClean' | 'resetHard' | 'removeWorktree'>;
+  forge: Forge; committer: { flush(reason?: string): Promise<void> };
+}
+
+export const INTERRUPTED = 'interrupted by daemon restart';
+export const REVERTED = 'reviewer modified the worktree (reverted)';
+export const RESTART_HINT = 'daemon code changed on main — restart the daemon to pick it up';
+const TEST_TIMEOUT_MS = 10 * 60_000;
+
+export interface StepInput { run: Run; nodeRuns: NodeRun[]; gates: Gate[]; retro: boolean; config: Config }
+export type Step =
+  | { kind: 'build'; iteration: number; row?: NodeRun; resume?: boolean }
+  | { kind: 'test' | 'review' | 'pr' | 'merge' | 'open_merge_gate'; iteration: number; row?: NodeRun }
+  | { kind: 'open_failure_gate'; node: 'build' | 'test' | 'review'; count: number }
+  | { kind: 'revive'; row: NodeRun } // interrupted merge_gate row: back to running, then re-derive
+  | { kind: 'wait' | 'finalize' | 'merge_reject' | 'failure_reject' | 'retro' | 'done' };
+
+type Out = { pre_sha?: string; head_sha?: string; verdict?: string; findings?: string[]; touches_factory?: boolean };
+const parse = (s: string | null | undefined): Out => { try { return JSON.parse(s ?? '') ?? {}; } catch { return {}; } };
+const latest = (gates: Gate[]) => gates.reduce<Gate | undefined>((m, g) => (!m || g.id > m.id ? g : m), undefined);
+const lastRow = (rows: NodeRun[], node: string, iteration?: number) =>
+  rows.findLast((n) => n.node === node && (iteration === undefined || n.iteration === iteration));
+const buildIteration = (rows: NodeRun[]) => Math.max(0, ...rows.filter((n) => n.node === 'build').map((n) => n.iteration));
+const now = () => new Date().toISOString();
+
+/** Pure: the next step for a run, derived only from persisted rows. First matching rule wins. */
+export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): Step {
+  const interrupted = nodeRuns.find((n) => n.status === 'failed' && n.output === INTERRUPTED);
+  if (interrupted) {
+    const { node, iteration } = interrupted;
+    if (node === 'merge_gate') return { kind: 'revive', row: interrupted };
+    if (node === 'build') return { kind: 'build', iteration, row: interrupted, resume: true };
+    return { kind: node as 'test', iteration, row: interrupted };
+  }
+  if (run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed') return { kind: retro ? 'done' : 'retro' };
+  const gate = latest(gates);
+  if (gate && gate.closed_at === null) return { kind: 'wait' };
+  if (nodeRuns.some((n) => n.node === 'merge' && n.status === 'completed')) return { kind: 'finalize' };
+
+  const it = buildIteration(nodeRuns);
+  const mg = lastRow(nodeRuns, 'merge_gate');
+  if (mg) {
+    const g = latest(gates.filter((x) => x.node === 'merge_gate'));
+    if (!g) return { kind: 'open_merge_gate', iteration: mg.iteration, row: mg.status === 'running' ? mg : undefined };
+    return g.decision === 'approve' ? { kind: 'merge', iteration: mg.iteration } : { kind: 'merge_reject' };
+  }
+  if (lastRow(nodeRuns, 'pr')?.status === 'completed') return { kind: 'open_merge_gate', iteration: it };
+  const review = lastRow(nodeRuns, 'review', it);
+  const verdict = review?.status === 'completed' ? parse(review.output).verdict : undefined;
+  if (verdict === 'approve') return { kind: 'pr', iteration: it };
+  if (gate?.kind === 'failure' && gate.decision === 'reject') return { kind: 'failure_reject' };
+
+  if (it === 0) return { kind: 'build', iteration: 1 };
+  const build = lastRow(nodeRuns, 'build', it)!;
+  const test = lastRow(nodeRuns, 'test', it);
+  if (build.status === 'completed' && !test) return { kind: 'test', iteration: it };
+  if (test?.status === 'completed' && (!review || review.status === 'failed')) return { kind: 'review', iteration: it };
+
+  const approved = (nodes: string[]) =>
+    gates.filter((g) => g.kind === 'failure' && g.decision === 'approve' && nodes.includes(g.node)).length;
+  if (build.status === 'failed' || test?.status === 'failed') {
+    const failed = new Set(nodeRuns.filter((n) => (n.node === 'build' || n.node === 'test') && n.status === 'failed')
+      .map((n) => n.iteration)).size;
+    if (failed >= config.loop.maxBuildAttempts * (1 + approved(['build', 'test']))) {
+      return { kind: 'open_failure_gate', node: test?.status === 'failed' ? 'test' : 'build', count: failed };
+    }
+    return { kind: 'build', iteration: it + 1 };
+  }
+  if (verdict === 'changes') {
+    const changes = nodeRuns.filter((n) => n.node === 'review' && n.status === 'completed' && parse(n.output).verdict === 'changes').length;
+    if (changes >= config.loop.maxReviewRounds * (1 + approved(['review']))) return { kind: 'open_failure_gate', node: 'review', count: changes };
+    return { kind: 'build', iteration: it + 1 };
+  }
+  throw new Error(`no next step (build #${it} ${build.status}, test ${test?.status ?? 'none'}, review ${review?.status ?? 'none'})`);
+}
+
+/** `sh -c cmd` in cwd; stdout+stderr interleaved; process group killed at the timeout. */
+function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tail: string }> {
+  const { promise, resolve } = Promise.withResolvers<{ code: number | string; tail: string }>();
+  const child = spawn('sh', ['-c', cmd], { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  let timedOut = false;
+  const add = (c: string) => { out += c; if (out.length > 1 << 20) out = out.slice(-(1 << 19)); };
+  for (const s of [child.stdout, child.stderr]) { s.setEncoding('utf8'); s.on('data', add); }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already gone */ }
+  }, TEST_TIMEOUT_MS);
+  child.on('error', (e) => add(`${e.message}\n`));
+  child.on('close', (code, signal) => {
+    clearTimeout(timer);
+    resolve({ code: timedOut ? 'timeout' : code ?? signal ?? 'unknown', tail: out.replace(/\n$/, '').split('\n').slice(-200).join('\n') });
+  });
+  return promise;
+}
+
+const reviewMarkdown = (model: string | null, v: Out) =>
+  [`## Review`, '', `Reviewer: ${model}`, `Verdict: **${v.verdict}**`, ...(v.findings?.length ? ['', ...v.findings.map((f) => `- ${f}`)] : [])].join('\n');
+
+const STOP = Symbol('stopped');
+
+/** Drives one `change` run until it is terminal or waiting on an open gate. Re-entrant: state lives in the store. */
+export async function runChange(ctx: ChangeContext): Promise<void> {
+  const { store, bus, config, paths, forge, worktrees: wt, runId } = ctx;
+  let cur: NodeRun | undefined; // node run to mark failed if a step throws
+  let step: Step | undefined;
+  const halt = () => { if (ctx.stopped()) throw STOP; };
+  const run = () => store.getRun(runId);
+  const item = () => store.getItem(run().item_id);
+
+  const setItem = (from: ItemStatus, to: ItemStatus) => { const i = item(); if (i.status !== to) store.transitionItem(i.id, from, to); };
+  const setRun = (from: RunStatus, to: RunStatus) => {
+    if (run().status !== to) store.transitionRun(runId, from, to);
+    if (to !== 'paused' && to !== 'running' && !run().ended_at) store.updateRun(runId, { ended_at: now() });
+  };
+  const resume = () => { setItem('blocked', 'active'); setRun('paused', 'running'); }; // only called where item is active/blocked
+  const close = (row: NodeRun, status: 'completed' | 'failed', p: NodeRunPatch = {}) => {
+    store.updateNodeRun(row.id, { ...p, ended_at: now() });
+    store.transitionNodeRun(row.id, 'running', status);
+  };
+  const begin = (node: string, iteration: number, row?: NodeRun, model?: string): NodeRun =>
+    (cur = row ? store.transitionNodeRun(row.id, 'failed', 'running')
+      : store.transitionNodeRun(store.createNodeRun({ run_id: runId, node, iteration, model }).id, 'pending', 'running'));
+  const end = (status: 'completed' | 'failed', p: NodeRunPatch = {}) => { close(cur!, status, p); cur = undefined; };
+  const addCost = () => store.updateRun(runId, { cost_usd: store.listNodeRuns(runId).reduce((s, n) => s + n.cost_usd, 0) });
+
+  const session = async (node: 'build' | 'review', prompt: string, model: string, cwd: string) => {
+    const o = await ctx.runSession(prompt, {
+      cwd, model, sessionDir: paths.sessionsDir,
+      timeoutMs: config.caps.sessionMinutes * 60_000, maxCostUsd: config.caps.sessionCostUsd,
+      onActivity: (text) => bus.publishActivity({ run_id: runId, node, text, at: now() }),
+    });
+    halt();
+    return o;
+  };
+  const common = (i: WorkItem, cwd: string) => ({
+    item_id: i.id, title: i.title, body: i.body,
+    spec: i.spec_path ? readFileSync(join(cwd, i.spec_path), 'utf8') : '',
+    spec_path: i.spec_path ?? '', test_cmd: i.test_cmd ?? config.defaultTestCmd,
+  });
+
+  async function exec(s: Step, r: Run, rows: NodeRun[], gates: Gate[]): Promise<void> {
+    const w = r.worktree!;
+    const it = buildIteration(rows);
+    switch (s.kind) {
+      case 'build': {
+        resume();
+        const i = item();
+        const model = config.roles.executor[i.tier ?? 'standard'];
+        begin('build', s.iteration, s.row, model);
+        const prev = (node: string) => rows.findLast((n) => n.iteration === s.iteration - 1 && n.node === node);
+        const failure = [prev('build'), prev('test')].find((n) => n?.status === 'failed');
+        const findings = parse(prev('review')?.output).findings ?? [];
+        const prompt = buildExecutorPrompt({
+          ...common(i, w),
+          prd_path: i.spec_path ? join(dirname(dirname(i.spec_path)), 'PRD.md') : '',
+          iteration: s.iteration,
+          failure_output: failure?.output ?? '',
+          review_findings: findings.map((f) => `- ${f}`).join('\n'),
+          gate_note: latest(gates.filter((g) => g.kind === 'failure' && g.decision === 'approve'))?.note ?? '',
+          resume: s.resume === true,
+        });
+        const o = await session('build', prompt, model, w);
+        wt.commitAll(w, `factory: #${i.id} ${i.title}`);
+        const ok = o.status === 'completed' && wt.commitsAhead(w, 'origin/main') > 0;
+        // On success the head is recorded so an interrupted review can recover its pre-review SHA.
+        const output = ok ? JSON.stringify({ head_sha: wt.headSha(w) })
+          : o.status === 'completed' ? 'no commits ahead of origin/main'
+          : o.status === 'error' || o.status === 'crashed' ? `${o.status}: ${o.error}` : o.status;
+        end(ok ? 'completed' : 'failed', { output, cost_usd: cur!.cost_usd + o.costUsd, session_file: o.sessionFile });
+        addCost();
+        return;
+      }
+      case 'test': {
+        const i = item();
+        begin('test', s.iteration, s.row);
+        const t = await runTest(i.test_cmd ?? config.defaultTestCmd, w);
+        halt();
+        end(t.code === 0 ? 'completed' : 'failed', { output: `exit ${t.code}\n${t.tail}` });
+        return;
+      }
+      case 'review': {
+        const i = item();
+        const build = lastRow(rows, 'build', s.iteration)!;
+        const family = (build.model ?? '').split('/')[0];
+        const model = config.roles.reviewer[family];
+        if (!model) throw new Error(`no reviewer mapped for model family '${family}'`);
+        begin('review', s.iteration, s.row, model);
+        // The engine overwrites an interrupted row's output, so a re-run falls back to the build's recorded head.
+        const pre = s.row ? parse(s.row.output).pre_sha ?? parse(build.output).head_sha ?? wt.headSha(w) : wt.headSha(w);
+        store.updateNodeRun(cur!.id, { output: JSON.stringify({ pre_sha: pre }) });
+        let reverted = false;
+        const contain = () => {
+          if (wt.isClean(w) && wt.headSha(w) === pre) return;
+          git(w, ['reset', '--hard', pre]);
+          wt.resetHard(w);
+          reverted = true;
+        };
+        if (s.row) contain();
+        const prompt = buildReviewerPrompt({
+          ...common(i, w), diff: git(w, ['diff', 'origin/main...HEAD']), test_output: lastRow(rows, 'test', s.iteration)?.output ?? '',
+        });
+        const o = await session('review', prompt, model, w);
+        const v: Verdict = o.status === 'completed' ? parseVerdict(o.finalText) : { verdict: 'changes', findings: [`reviewer session ${o.status}`] };
+        contain();
+        if (reverted) v.findings.push(REVERTED);
+        end('completed', { output: JSON.stringify({ pre_sha: pre, ...v }), cost_usd: cur!.cost_usd + o.costUsd, session_file: o.sessionFile });
+        addCost();
+        return;
+      }
+      case 'pr': {
+        const i = item();
+        const review = lastRow(rows, 'review', s.iteration)!;
+        const cmd = i.test_cmd ?? config.defaultTestCmd;
+        const tail = (lastRow(rows, 'test', s.iteration)?.output ?? '').split('\n').slice(1).slice(-20).join('\n');
+        const md = reviewMarkdown(review.model, parse(review.output));
+        begin('pr', s.iteration, s.row);
+        await forge.pushBranch(w, r.branch!);
+        halt();
+        let n = r.pr_number;
+        if (n === null) {
+          const body = [i.body, ...(i.spec_path ? [`Spec: ${i.spec_path}`] : []), `## Tests\n\n\`${cmd}\`: exit 0\n\n\`\`\`\n${tail}\n\`\`\``, md].join('\n\n');
+          const pr = await forge.openPr({ branch: r.branch!, title: `#${i.id} ${i.title}`, body });
+          n = pr.number;
+          // Written before the stop check: losing the number would open a duplicate PR on re-run.
+          store.updateRun(runId, { pr_number: pr.number, pr_url: pr.url, head_sha: wt.headSha(w) });
+          halt();
+        }
+        await forge.commentPr(n, md);
+        halt();
+        end('completed', { output: run().pr_url });
+        return;
+      }
+      case 'open_merge_gate': {
+        const i = item();
+        cur = s.row ?? begin('merge_gate', s.iteration);
+        store.openGate({
+          run_id: runId, node: 'merge_gate', kind: 'merge',
+          question: `Merge PR #${r.pr_number} for #${i.id} ${i.title}?`,
+          recommendation: `approve — tests pass, ${lastRow(rows, 'review')?.model} approved`,
+        });
+        setRun('running', 'paused');
+        cur = undefined; // stays running until the gate is decided
+        return;
+      }
+      case 'open_failure_gate': {
+        const i = item();
+        setItem('active', 'blocked');
+        store.openGate({
+          run_id: runId, node: s.node, kind: 'failure',
+          question: `#${i.id} ${i.title}: ${s.node} failed ${s.count} times. Retry?`,
+          recommendation: `reject — inspect worktree ${w}`,
+        });
+        setRun('running', 'paused');
+        return;
+      }
+      case 'wait': {
+        if (latest(gates)!.kind === 'failure') setItem('active', 'blocked');
+        setRun('running', 'paused');
+        return;
+      }
+      case 'revive':
+        store.transitionNodeRun(s.row.id, 'failed', 'running');
+        return;
+      case 'merge': {
+        resume();
+        const mg = lastRow(rows, 'merge_gate');
+        if (mg?.status === 'running') close(mg, 'completed');
+        const n = r.pr_number!;
+        begin('merge', s.iteration, s.row);
+        const touches = existsSync(w) && git(w, ['diff', '--name-only', 'origin/main...HEAD']).split('\n').some((l) => l.startsWith('factory/'));
+        if ((await forge.prState(n)).state !== 'MERGED') {
+          halt();
+          await forge.mergePr(n, r.head_sha!);
+        }
+        halt();
+        await forge.syncMain();
+        halt();
+        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
+        await forge.deleteRemoteBranch(r.branch!);
+        halt();
+        end('completed', { output: JSON.stringify({ touches_factory: touches }) });
+        return; // finalize is derived next
+      }
+      case 'finalize': {
+        const i = item();
+        setItem('active', 'done');
+        setRun('running', 'completed');
+        await ctx.committer.flush(`merged #${i.id}`);
+        return;
+      }
+      case 'merge_reject': {
+        const g = latest(gates.filter((x) => x.node === 'merge_gate'))!;
+        const n = r.pr_number!;
+        if ((await forge.prState(n)).state === 'OPEN') {
+          halt();
+          await forge.closePr(n, g.note ?? undefined);
+        }
+        halt();
+        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
+        await forge.deleteRemoteBranch(r.branch!);
+        halt();
+        const mg = lastRow(rows, 'merge_gate');
+        if (mg?.status === 'running') close(mg, 'failed');
+        setRun('paused', 'cancelled');
+        setItem('active', 'ready');
+        return;
+      }
+      case 'failure_reject':
+        setItem('blocked', 'cancelled');
+        setRun('paused', 'failed');
+        return;
+      case 'retro': {
+        const findings = rows.filter((n) => n.node === 'review').flatMap((n) => parse(n.output).findings ?? []);
+        const touches = parse(lastRow(rows, 'merge')?.output).touches_factory === true;
+        begin('retro', Math.max(1, it));
+        const retro = computeRetro(run(), rows, findings);
+        if (touches) {
+          retro.notes = RESTART_HINT;
+          console.log(RESTART_HINT);
+        }
+        store.recordRetro(retro);
+        end('completed');
+        return;
+      }
+      case 'done':
+        return;
+    }
+  }
+
+  try {
+    for (;;) {
+      halt();
+      const r = run();
+      const rows = store.listNodeRuns(runId);
+      const gates = store.listGates({ run_id: runId });
+      step = nextStep({ run: r, nodeRuns: rows, gates, retro: store.getRetro(runId) !== undefined, config });
+      if (step.kind === 'done') return;
+      await exec(step, r, rows, gates);
+      if (step.kind === 'wait' || step.kind === 'open_merge_gate' || step.kind === 'open_failure_gate') return;
+    }
+  } catch (e) {
+    if (e === STOP) return;
+    if (e instanceof ConflictError) {
+      console.error(`factory: run ${runId} ${step?.kind}: ${e.message}`);
+      return;
+    }
+    console.error(`factory: run ${runId} ${step?.kind} failed:`, e);
+    if (cur) {
+      try { close(cur, 'failed', { output: (e as Error).message }); } catch (e2) { console.error(`factory: run ${runId}: could not mark node run ${cur.id} failed:`, e2); }
+    }
+  }
+}

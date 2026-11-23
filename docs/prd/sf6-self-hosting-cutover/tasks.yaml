@@ -1,0 +1,27 @@
+- name: Land v0 on main
+  description: Push feat/software-factory, open a PR with gh, human merges with a
+    merge commit; then remove the branch-only unsigned includeIf and switch the user
+    checkout to main.
+  status: in-progress
+  spec: specs/land-v0.md
+- name: Run the factory on itself
+  description: Self-hosted loop and the design-doc extraction proceed in parallel
+    once v0 is on main.
+  subtasks:
+    - name: Self-hosted README loop
+      description: Run the daemon on this repo, add and start the README work item,
+        drive it through build → test → review → PR → human merge gate → merge → retro,
+        and verify every artifact.
+      status: defined
+      spec: specs/self-hosted-readme-loop.md
+    - name: Extract architecture doc
+      description: Create docs/factory/architecture.md from the umbrella PRD's Architecture,
+        Constraints and Discussion, with an ADR-style decision log.
+      status: defined
+      spec: specs/extract-architecture-doc.md
+- name: Import program and retire docs/prd
+  description: factory import the umbrella, normalize sf6 and container statuses,
+    delete docs/prd, commit and push, stop the daemon so the shutdown flush commits
+    state.
+  status: defined
+  spec: specs/import-and-retire.md
