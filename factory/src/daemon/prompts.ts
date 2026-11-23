@@ -9,8 +9,11 @@ export interface ReviewerVars {
   item_id: number; title: string; body: string; spec: string; spec_path: string;
   test_cmd: string; diff: string; test_output: string; human_notes: string;
 }
-export interface Verdict { verdict: 'approve' | 'changes'; findings: string[] }
-export const NO_VERDICT_FINDING = 'reviewer returned no parseable verdict';
+export interface Finding { severity: 'blocking' | 'advisory'; text: string }
+export interface Verdict { verdict: 'approve' | 'changes'; findings: Finding[] }
+export const NO_VERDICT_FINDING: Finding = { severity: 'blocking', text: 'reviewer returned no parseable verdict' };
+/** Plain strings (verdicts written before severities existed) count as blocking. */
+export const asFinding = (f: string | Finding): Finding => typeof f === 'string' ? { severity: 'blocking', text: f } : f;
 
 const load = (name: string) => readFileSync(new URL(`./prompts/${name}.md`, import.meta.url), 'utf8');
 const EXECUTOR = load('executor');
@@ -44,9 +47,13 @@ export function parseVerdict(finalText: string): Verdict {
   const last = blocks.at(-1);
   try {
     const j = JSON.parse(last![1]);
-    const findings = j.findings === undefined && j.verdict === 'approve' ? [] : j.findings;
-    if ((j.verdict === 'approve' || j.verdict === 'changes') && Array.isArray(findings) && findings.every((f) => typeof f === 'string')) {
-      return { verdict: j.verdict, findings };
+    const raw = j.findings === undefined && j.verdict === 'approve' ? [] : j.findings;
+    const valid = (f: unknown): f is string | Finding => typeof f === 'string'
+      || (typeof f === 'object' && f !== null && 'text' in f && typeof f.text === 'string' && 'severity' in f && (f.severity === 'blocking' || f.severity === 'advisory'));
+    if ((j.verdict === 'approve' || j.verdict === 'changes') && Array.isArray(raw) && raw.every(valid)) {
+      const findings: Finding[] = raw.map((f: string | Finding) => { const { severity, text } = asFinding(f); return { severity, text }; });
+      // The findings decide: any blocking finding means `changes` (even if the reviewer said `approve`); none means `approve`.
+      return { verdict: findings.some((f) => f.severity === 'blocking') ? 'changes' : 'approve', findings };
     }
   } catch {}
   return { verdict: 'changes', findings: [NO_VERDICT_FINDING] };

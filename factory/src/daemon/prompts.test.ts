@@ -37,12 +37,16 @@ test('reviewer render', () => {
   const out = buildReviewerPrompt({ item_id: 1, title: 't', body: 'b', spec: 's', spec_path: 'p', test_cmd: 'npm test', diff: '+added line', test_output: 'ok', human_notes: '' });
   assert.ok(out.includes('+added line'));
   assert.ok(out.includes('Do not modify, create, or delete any files, and do not commit. Changes you make will be reverted and reported.'));
-  assert.ok(out.includes('{ "verdict": "approve" | "changes", "findings": ["..."] }'));
+  assert.ok(out.includes('{ "verdict": "approve" | "changes", "findings": [{ "severity": "blocking" | "advisory", "text": "..." }] }'));
+  assert.ok(out.includes('a correctness, security, data-loss, or spec-violation problem in this change'));
   assert.ok(!/\{\{\w/.test(out));
 });
 
 const bad = { verdict: 'changes', findings: [NO_VERDICT_FINDING] };
 const block = (s: string, lang = 'json') => '```' + lang + '\n' + s + '\n```';
+
+const blocking = (text: string) => ({ severity: 'blocking', text });
+const advisory = (text: string) => ({ severity: 'advisory', text });
 
 test('parseVerdict', () => {
   assert.deepEqual(parseVerdict('ok\n' + block('{"verdict":"approve","findings":[]}')), { verdict: 'approve', findings: [] });
@@ -51,6 +55,23 @@ test('parseVerdict', () => {
   assert.deepEqual(parseVerdict(block('{not json')), bad);
   assert.deepEqual(parseVerdict(block('{"verdict":"lgtm","findings":[]}')), bad);
   assert.deepEqual(parseVerdict(block('{"verdict":"changes"}')), bad);
-  assert.deepEqual(parseVerdict(block('{"verdict":"approve","findings":["nit"]}', 'JSON  ')), { verdict: 'approve', findings: ['nit'] });
+  assert.deepEqual(parseVerdict(block('{"verdict":"approve","findings":[{"severity":"advisory","text":"nit"}]}', 'JSON  ')), { verdict: 'approve', findings: [advisory('nit')] });
   assert.deepEqual(parseVerdict(block('{"verdict":"approve","findings":[]}') + '\n' + block('const x = 1;', 'ts')), { verdict: 'approve', findings: [] });
+});
+
+test('parseVerdict severities', () => {
+  const changes = (findings: unknown[]) => parseVerdict(block(JSON.stringify({ verdict: 'changes', findings })));
+  assert.deepEqual(changes([blocking('a'), advisory('b')]), { verdict: 'changes', findings: [blocking('a'), advisory('b')] });
+  // advisory-only `changes` is an approval
+  assert.deepEqual(changes([advisory('b')]), { verdict: 'approve', findings: [advisory('b')] });
+  // legacy plain strings count as blocking
+  assert.deepEqual(changes(['a']), { verdict: 'changes', findings: [blocking('a')] });
+  assert.deepEqual(changes(['a', advisory('b')]), { verdict: 'changes', findings: [blocking('a'), advisory('b')] });
+  // a blocking finding overrides an `approve` verdict
+  const approves = (findings: unknown[]) => parseVerdict(block(JSON.stringify({ verdict: 'approve', findings })));
+  assert.deepEqual(approves([blocking('a')]), { verdict: 'changes', findings: [blocking('a')] });
+  assert.deepEqual(approves(['a']), { verdict: 'changes', findings: [blocking('a')] });
+  // unknown severity or missing text is unparseable
+  assert.deepEqual(changes([{ severity: 'nit', text: 'a' }]), bad);
+  assert.deepEqual(changes([{ severity: 'blocking' }]), bad);
 });

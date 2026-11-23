@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { git } from './git.ts';
-import { buildExecutorPrompt, buildReviewerPrompt, parseVerdict, type Verdict } from './prompts.ts';
+import { asFinding, buildExecutorPrompt, buildReviewerPrompt, parseVerdict, type Finding, type Verdict } from './prompts.ts';
 import { computeRetro } from './retro.ts';
 import { ConflictError, type NodeRunPatch, type Store } from './store.ts';
 import type { Bus } from './bus.ts';
@@ -32,8 +32,9 @@ export type Step =
   | { kind: 'revive'; row: NodeRun } // interrupted merge_gate row: back to running, then re-derive
   | { kind: 'wait' | 'finalize' | 'merge_reject' | 'failure_reject' | 'retro' | 'done' };
 
-type Out = { pre_sha?: string; head_sha?: string; verdict?: string; findings?: string[]; touches_factory?: boolean };
+type Out = { pre_sha?: string; head_sha?: string; verdict?: string; findings?: (string | Finding)[]; touches_factory?: boolean };
 const parse = (s: string | null | undefined): Out => { try { return JSON.parse(s ?? '') ?? {}; } catch { return {}; } };
+const findingsOf = (s: string | null | undefined): Finding[] => (parse(s).findings ?? []).map(asFinding);
 // Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
 const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
   .sort((a, b) => a.id - b.id).map((g) => `- (${g.kind} gate, ${g.decision}) ${g.note}`).join('\n');
@@ -114,8 +115,15 @@ function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tai
   return promise;
 }
 
-const reviewMarkdown = (model: string | null, v: Out) =>
-  [`## Review`, '', `Reviewer: ${model}`, `Verdict: **${v.verdict}**`, ...(v.findings?.length ? ['', ...v.findings.map((f) => `- ${f}`)] : [])].join('\n');
+/** `advisory` spans every review round, so advisories from rounds that triggered rework still reach the human. */
+const reviewMarkdown = (model: string | null, v: Out, advisories: Finding[]) => {
+  const list = (fs: Finding[]) => fs.map((f) => `- ${f.text}`);
+  const blocking = list((v.findings ?? []).map(asFinding).filter((f) => f.severity === 'blocking'));
+  const advisory = list(advisories);
+  return [`## Review`, '', `Reviewer: ${model}`, `Verdict: **${v.verdict}**`,
+    ...(blocking.length ? ['', ...blocking] : []),
+    ...(advisory.length ? ['', '### Advisory (not blocking)', '', ...advisory] : [])].join('\n');
+};
 
 const STOP = Symbol('stopped');
 
@@ -153,7 +161,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
     try { return store.atomic(fn); } catch (e) { cur = saved; throw e; }
   };
   // Retro is part of terminalization: callers run it in the same transaction that makes the run terminal.
-  const reviewFindings = (rows: NodeRun[]) => rows.filter((n) => n.node === 'review').flatMap((n) => parse(n.output).findings ?? []);
+  const reviewFindings = (rows: NodeRun[]) => rows.filter((n) => n.node === 'review').flatMap((n) => findingsOf(n.output).map((f) => `[${f.severity}] ${f.text}`));
   const writeRetro = () => {
     const rows = store.listNodeRuns(runId);
     const findings = reviewFindings(rows);
@@ -195,14 +203,14 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         begin('build', s.iteration, s.row, model);
         const prev = (node: string) => rows.findLast((n) => n.iteration === s.iteration - 1 && n.node === node);
         const failure = [prev('build'), prev('test')].find((n) => n?.status === 'failed');
-        const findings = parse(prev('review')?.output).findings ?? [];
+        const findings = findingsOf(prev('review')?.output).filter((f) => f.severity === 'blocking');
         const prompt = buildExecutorPrompt({
           ...common(i, w),
           prd_path: i.spec_path ? join(dirname(dirname(i.spec_path)), 'PRD.md') : '',
           iteration: s.iteration,
           human_notes: humanNotes(gates),
           failure_output: failure?.output ?? '',
-          review_findings: findings.map((f) => `- ${f}`).join('\n'),
+          review_findings: findings.map((f) => `- ${f.text}`).join('\n'),
           resume: s.resume === true,
         });
         const o = await session('build', prompt, model, w);
@@ -246,9 +254,9 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           ...common(i, w), diff: git(w, ['diff', 'origin/main...HEAD']), test_output: lastRow(rows, 'test', s.iteration)?.output ?? '', human_notes: humanNotes(gates),
         });
         const o = await session('review', prompt, model, w);
-        const v: Verdict = o.status === 'completed' ? parseVerdict(o.finalText) : { verdict: 'changes', findings: [`reviewer session ${o.status}`] };
+        const v: Verdict = o.status === 'completed' ? parseVerdict(o.finalText) : { verdict: 'changes', findings: [{ severity: 'blocking', text: `reviewer session ${o.status}` }] };
         contain();
-        if (reverted) v.findings.push(REVERTED);
+        if (reverted) v.findings.push({ severity: 'advisory', text: REVERTED });
         end('completed', { output: JSON.stringify({ pre_sha: pre, ...v }), cost_usd: cur!.cost_usd + o.costUsd, session_file: o.sessionFile });
         addCost();
         return;
@@ -259,7 +267,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const review = lastRow(rows, 'review', s.iteration)!;
         const cmd = i.test_cmd ?? config.defaultTestCmd;
         const tail = (lastRow(rows, 'test', s.iteration)?.output ?? '').split('\n').slice(1).slice(-20).join('\n');
-        const md = reviewMarkdown(review.model, parse(review.output));
+        const md = reviewMarkdown(review.model, parse(review.output),
+          rows.filter((n) => n.node === 'review' && n.status === 'completed').flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'));
         await forge.pushBranch(w, r.branch!);
         halt();
         let n = r.pr_number;

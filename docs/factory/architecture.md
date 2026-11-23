@@ -121,13 +121,13 @@ flowchart LR
 |------|------|--------------|----------|
 | `build` | omp session at `roles.executor[tier]`; prompt from `prompts/executor.md` with the previous iteration's failure output, review findings, and the human notes from every closed gate in the run (same ordered section as the reviewer prompt, each with its gate decision). The daemon then `commitAll`s as `factory: #<id> <title>`. | session `completed` **and** ≥ 1 commit ahead of `origin/main` | `{"head_sha"}` on success; else the failure reason |
 | `test` | `sh -c <test_cmd>` in the worktree, own process group, 10 min timeout | exit 0 | `exit <code>\n<last 200 lines>` |
-| `review` | omp session at `roles.reviewer[<author family>]`; prompt from `prompts/reviewer.md` with the diff `origin/main...HEAD`, test output, and the human notes from every closed gate in the run (identical ordered section to the executor prompt, each with its gate decision; these override the item body where they conflict) | always `completed`; the verdict decides. Unparseable or failed session → `changes`. | `{"pre_sha","verdict","findings"}` |
-| `pr` | push `--force-with-lease`, `gh pr create` (body: item body, spec, test tail, review), then the verdict as a PR comment. `pr_number`/`pr_url`/`head_sha` are stored right after create so a re-run never opens a duplicate. | | PR URL |
+| `review` | omp session at `roles.reviewer[<author family>]`; prompt from `prompts/reviewer.md` with the diff `origin/main...HEAD`, test output, and the human notes from every closed gate in the run (identical ordered section to the executor prompt, each with its gate decision; these override the item body where they conflict). The verdict is `{verdict, findings: [{severity: "blocking"\|"advisory", text}]}`: *blocking* is a correctness, security, data-loss, or spec-violation problem in this change; everything else (hardening, style, hypothetical threats outside the threat model, follow-ups) is *advisory*. `parseVerdict` returns `changes` iff ≥ 1 finding is blocking (advisory-only `changes` → `approve`; `approve` with a blocking finding → `changes`); plain-string findings from older verdicts count as blocking. | always `completed`; the verdict decides. Unparseable or failed session → `changes` (blocking finding). | `{"pre_sha","verdict","findings"}` |
+| `pr` | push `--force-with-lease`, `gh pr create` (body: item body, spec, test tail, review), then the verdict as a PR comment. Advisory findings from every review round (including rounds that triggered rework) are listed in both under `### Advisory (not blocking)` for the human at the merge gate; only blocking findings go back to the executor on rework. `pr_number`/`pr_url`/`head_sha` are stored right after create so a re-run never opens a duplicate. | | PR URL |
 | `merge_gate` | opens a `merge` gate; run → `paused`; node stays `running` until decided | approve | |
 | `merge` | `gh pr merge --squash --match-head-commit <head_sha>` (skipped if already `MERGED`), wait ≤ 30 s for `MERGED`, sync `.factory/main`. Finalize then commits item `done`, run `completed`, and the retro in one transaction, and only afterwards deletes the remote branch and removes the worktree + local branch. | | `{"touches_factory"}` |
-| `retro` | `computeRetro` (pure) over the node runs; findings from every review | | |
+| `retro` | `computeRetro` (pure) over the node runs; `findings` keeps both kinds from every review, each prefixed `[blocking]` or `[advisory]` | | |
 
-**Code decides when work is done.** `prompt_result.status:"completed"` only means the session ended. Success is tests exiting 0, the branch having a new commit, and the reviewer verdict JSON saying `approve`.
+**Code decides when work is done.** `prompt_result.status:"completed"` only means the session ended. Success is tests exiting 0, the branch having a new commit, and the parsed reviewer verdict being `approve` (no blocking finding; an advisory-only `changes` response proceeds).
 
 **Budgets** (`.factory/config.json`):
 
@@ -428,6 +428,9 @@ Verified locally on omp 19.1.0 and Node 24.16; keep them unless re-verified.
 - Context: In-place retry of an errored node in a re-entrant state machine kept producing edge cases (#53, #56: 15 review findings in 2 rounds). Without handling, the run stayed `running`, held a dispatch slot, and re-entry hit `UNIQUE(run_id,node,iteration)`.
 - Decision: Unexpected node errors fail the run; recovery is a new attempt, never an in-place retry.
 - Consequences: A rare error costs a rebuild (`factory start <id>` makes attempt n+1 from `origin/main`). No retry gates or automatic retries for errors.
+
+### D-42 Reviewer severity
+- Decision: Persisted review verdicts are not re-evaluated after severity rules change; runs in flight finish under the rules they started with.
 
 ## 9. Open risks and v1 backlog
 

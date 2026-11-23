@@ -38,7 +38,12 @@ Review the diff against the spec's acceptance criteria and its Out of Scope sect
 End your reply with exactly one fenced `json` block, and nothing after it:
 
 ```json
-{ "verdict": "approve" | "changes", "findings": ["..."] }
+{ "verdict": "approve" | "changes", "findings": [{ "severity": "blocking" | "advisory", "text": "..." }] }
 ```
 
-`findings` lists concrete, actionable problems (empty on approve).
+`findings` lists concrete, actionable problems and notes. Each has a severity:
+
+- `blocking`: a correctness, security, data-loss, or spec-violation problem in this change.
+- `advisory`: everything else: hardening, style, hypothetical threats outside the stated threat model, follow-ups. Advisory findings go to the human at the merge gate and never trigger rework.
+
+Use `changes` only if at least one finding is blocking; otherwise `approve`, listing any advisory findings.
