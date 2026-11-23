@@ -89,8 +89,8 @@ export async function main(argv: string[]): Promise<number> {
         for (const { run, node_runs, gates } of runs) {
           out(`run #${run.id} ${run.status} attempt ${run.attempt}${run.pr_url ? ` ${run.pr_url}` : ''}`);
           for (const n of node_runs) out(`  ${n.node}#${n.iteration} ${n.status}${n.model ? ` ${n.model}` : ''}`);
-          for (const g of gates) {
-            out(`  gate #${g.id} ${g.kind}${g.decision ? ` ${g.decision}` : ''}: ${g.question}`);
+          for (const g of gates.filter((g) => !g.closed_at)) {
+            out(`  gate #${g.id} ${g.kind}: ${g.question}`);
             if (g.pr_url) out(`    pr: ${g.pr_url}`);
           }
         }
