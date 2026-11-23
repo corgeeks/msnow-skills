@@ -429,6 +429,9 @@ Verified locally on omp 19.1.0 and Node 24.16; keep them unless re-verified.
 - Decision: Unexpected node errors fail the run; recovery is a new attempt, never an in-place retry.
 - Consequences: A rare error costs a rebuild (`factory start <id>` makes attempt n+1 from `origin/main`). No retry gates or automatic retries for errors.
 
+### D-42 Reviewer severity
+- Decision: Persisted review verdicts are not re-evaluated after severity rules change; runs in flight finish under the rules they started with.
+
 ## 9. Open risks and v1 backlog
 
 **Open risks**

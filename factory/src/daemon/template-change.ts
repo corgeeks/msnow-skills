@@ -35,8 +35,6 @@ export type Step =
 type Out = { pre_sha?: string; head_sha?: string; verdict?: string; findings?: (string | Finding)[]; touches_factory?: boolean };
 const parse = (s: string | null | undefined): Out => { try { return JSON.parse(s ?? '') ?? {}; } catch { return {}; } };
 const findingsOf = (s: string | null | undefined): Finding[] => (parse(s).findings ?? []).map(asFinding);
-// Persisted reviews are re-derived, not trusted: rows written by older parsers (e.g. approve + plain-string findings) must route by today's rules.
-const verdictOf = (s: string | null | undefined): Verdict['verdict'] => parseVerdict('```json\n' + (s ?? '') + '\n```').verdict;
 // Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
 const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
   .sort((a, b) => a.id - b.id).map((g) => `- (${g.kind} gate, ${g.decision}) ${g.note}`).join('\n');
@@ -69,9 +67,9 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
   }
   if (lastRow(nodeRuns, 'pr')?.status === 'completed') return { kind: 'open_merge_gate', iteration: it };
   const review = lastRow(nodeRuns, 'review', it);
-  const verdict = review?.status === 'completed' ? verdictOf(review.output) : undefined;
-  if (gate?.kind === 'failure' && gate.decision === 'reject') return { kind: 'failure_reject' };
+  const verdict = review?.status === 'completed' ? parse(review.output).verdict : undefined;
   if (verdict === 'approve') return { kind: 'pr', iteration: it };
+  if (gate?.kind === 'failure' && gate.decision === 'reject') return { kind: 'failure_reject' };
 
   if (it === 0) return { kind: 'build', iteration: 1 };
   const build = lastRow(nodeRuns, 'build', it)!;
@@ -90,7 +88,7 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
     return { kind: 'build', iteration: it + 1 };
   }
   if (verdict === 'changes') {
-    const changes = nodeRuns.filter((n) => n.node === 'review' && n.status === 'completed' && verdictOf(n.output) === 'changes').length;
+    const changes = nodeRuns.filter((n) => n.node === 'review' && n.status === 'completed' && parse(n.output).verdict === 'changes').length;
     if (changes >= config.loop.maxReviewRounds * (1 + approved(['review']))) return { kind: 'open_failure_gate', node: 'review', count: changes };
     return { kind: 'build', iteration: it + 1 };
   }
@@ -264,7 +262,6 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         return;
       }
       case 'pr': {
-        resume(); // a failure gate persisted by an older parser can be approved straight into PR
         const i = item();
         begin('pr', s.iteration, s.row);
         const review = lastRow(rows, 'review', s.iteration)!;
