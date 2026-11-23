@@ -124,7 +124,7 @@ test('e2e', { concurrency: 1 }, async (t) => {
   }
 
   const changes = (text: string): Script => (c) => c.role === 'review'
-    ? { FAKE_OMP_SCENARIO: 'complete', FAKE_OMP_TEXT: '```json\n{"verdict":"changes","findings":[{"severity":"blocking","text":"' + text + '"},{"severity":"advisory","text":"style y"}]}\n```' }
+    ? { FAKE_OMP_SCENARIO: 'complete', FAKE_OMP_TEXT: '```json\n{"verdict":"changes","findings":[{"severity":"blocking","text":"' + text + '"},{"severity":"advisory","text":"style r' + c.n + '"}]}\n```' }
     : defaultScript(c);
   const reviewGate = async (f: F) => {
     const item = f.queueItem();
@@ -152,7 +152,8 @@ test('e2e', { concurrency: 1 }, async (t) => {
       assert.match(text, /Overridden by the human/);
       assert.match(text, /Note: good enough/);
       assert.match(text, /- \[blocking\] rename x/);
-      assert.match(text, /- \[advisory\] style y/);
+      assert.match(text, /- \[advisory\] style r2/);
+      assert.match(text, /- \[advisory, earlier round\] style r1/);
     }
     assert.ok(!f.nodes(run.id).some((n) => n.node === 'build' && n.iteration === 3));
     await f.decide(mg.id, 'approve');

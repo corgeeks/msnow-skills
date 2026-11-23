@@ -144,9 +144,10 @@ const reviewMarkdown = (model: string | null, v: Out, advisories: Finding[]) => 
     ...(advisory.length ? ['', '### Advisory (not blocking)', '', ...advisory] : [])].join('\n');
 };
 
-/** PR body/comment section for a failure gate overridden by the human: the note and every finding of the latest review. */
-const overrideMarkdown = (g: Gate, review: NodeRun | undefined) => {
-  const findings = findingsOf(review?.output).map((f) => `- [${f.severity}] ${f.text}`);
+/** PR body/comment section for a failure gate overridden by the human: the note, every finding of the latest review, and advisories from earlier rounds. */
+const overrideMarkdown = (g: Gate, review: NodeRun | undefined, earlier: Finding[]) => {
+  const findings = [...findingsOf(review?.output).map((f) => `- [${f.severity}] ${f.text}`),
+    ...earlier.map((f) => `- [advisory, earlier round] ${f.text}`)];
   return ['## Overridden by the human', '', `Failure gate #${g.id} (${g.node}) was overridden; the tested commit went straight to this PR.`, '',
     `Note: ${g.note ?? '(none)'}`, '',
     `### Latest review${review ? ` (${review.model}, verdict **${parse(review.output).verdict}**)` : ''}`, '',
@@ -299,7 +300,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const cmd = i.test_cmd ?? config.defaultTestCmd;
         const tail = testText(lastRow(rows, 'test', ov ? undefined : s.iteration)?.output ?? null).split('\n').slice(1).slice(-20).join('\n');
         const review = lastRow(rows, 'review', ov ? undefined : s.iteration);
-        const md = ov ? overrideMarkdown(ov.gate, review)
+        const md = ov ? overrideMarkdown(ov.gate, review,
+          rows.filter((n) => n.node === 'review' && n.status === 'completed' && n.id !== review?.id).flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'))
           : reviewMarkdown(review!.model, parse(review!.output),
             rows.filter((n) => n.node === 'review' && n.status === 'completed').flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'));
         await forge.pushBranch(w, r.branch!, ov?.sha);
@@ -315,6 +317,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         }
         if (ov) {
           const oid = (await forge.prState(n)).headRefOid;
+          halt();
           if (oid !== ov.sha) throw new Error(`PR #${n} head ${oid} is not the tested SHA ${ov.sha}`);
         }
         await forge.commentPr(n, md);
