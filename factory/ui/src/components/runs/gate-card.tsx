@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTime } from '@/lib/format';
-import type { Gate } from '@/lib/api';
+import type { GateWithPr } from '@/lib/api';
 
 const DECISION = {
   approve: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
@@ -10,7 +10,20 @@ const DECISION = {
   open: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
 };
 
-export function GateCard({ gate, context }: { gate: Gate; context?: ReactNode }) {
+// Links the PR reference in the question (its URL, else "PR #N"); appends the link when the question names neither.
+function Question({ gate }: { gate: GateWithPr }) {
+  const { question, pr_number: n, pr_url: url } = gate;
+  if (!url || n === null) return <p className="whitespace-pre-wrap">{question}</p>;
+  const byUrl = question.indexOf(url);
+  const byNumber = question.search(new RegExp(`PR #${n}\\b`));
+  const at = byUrl >= 0 ? byUrl : byNumber;
+  const text = byUrl >= 0 ? url : `PR #${n}`;
+  const ref = <a href={url} target="_blank" rel="noreferrer" className="underline">{text}</a>;
+  if (at < 0) return <p className="whitespace-pre-wrap">{question} ({ref})</p>;
+  return <p className="whitespace-pre-wrap">{question.slice(0, at)}{ref}{question.slice(at + text.length)}</p>;
+}
+
+export function GateCard({ gate, context }: { gate: GateWithPr; context?: ReactNode }) {
   const label = gate.closed_at === null ? 'open' : gate.decision ?? 'open';
   return (
     <Card size="sm">
@@ -23,7 +36,7 @@ export function GateCard({ gate, context }: { gate: Gate; context?: ReactNode })
         {context && <div className="text-muted-foreground text-sm">{context}</div>}
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <p className="whitespace-pre-wrap">{gate.question}</p>
+        <Question gate={gate} />
         {gate.recommendation && <p className="whitespace-pre-wrap"><span className="font-medium">Recommendation:</span> {gate.recommendation}</p>}
         <p className="text-muted-foreground">
           Opened {formatTime(gate.opened_at)}

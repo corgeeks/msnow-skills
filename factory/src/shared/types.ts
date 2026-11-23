@@ -31,6 +31,8 @@ export interface Gate {
   recommendation: string | null; opened_at: string; closed_at: string | null;
   decision: GateDecision | null; note: string | null;
 }
+/** A gate with its run's PR; pr_url is null until the run opens one. */
+export interface GateWithPr extends Gate { pr_number: number | null; pr_url: string | null }
 export interface FactoryEvent {
   seq: number; item_id: number | null; run_id: number | null; node: string | null;
   type: EventType; data: Record<string, unknown>; at: string;
@@ -44,7 +46,7 @@ export interface BatchItem {          // POST /api/items/batch input (import + C
 export interface BatchResult { ids: Record<string, number>; created: string[]; skipped: string[] }
 export interface ItemSummary extends WorkItem { open_deps: number }   // GET /api/items
 export interface ItemDetail { item: WorkItem; deps: WorkItem[]; dependents: WorkItem[]; children: WorkItem[]; runs: Run[] }
-export interface RunDetail { run: Run; node_runs: NodeRun[]; gates: Gate[] }
+export interface RunDetail { run: Run; node_runs: NodeRun[]; gates: GateWithPr[] }
 export interface Retro {
   run_id: number; failures: string[]; findings: string[]; rework_count: number;
   cost_usd: number; duration_s: number; notes: string;

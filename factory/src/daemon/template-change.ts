@@ -253,7 +253,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         cur = s.row ?? begin('merge_gate', s.iteration);
         store.openGate({
           run_id: runId, node: 'merge_gate', kind: 'merge',
-          question: `Merge PR #${r.pr_number} for #${i.id} ${i.title}?`,
+          question: `Merge PR #${r.pr_number} (${r.pr_url}) for #${i.id} ${i.title}?`,
           recommendation: `approve — tests pass, ${lastRow(rows, 'review')?.model} approved`,
         });
         setRun('running', 'paused');

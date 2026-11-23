@@ -105,3 +105,12 @@ test('decideGate twice throws ConflictError', () => {
   assert.equal(store.listGates({ open: true }).length, 0);
   assert.equal(store.listGates().length, 1);
 });
+
+test('listGates carries the run PR', () => {
+  const { store } = setup();
+  const run = store.createRun({ item_id: store.createItem({ title: 'a' }).id, template: 't' });
+  store.openGate({ run_id: run.id, node: 'merge', kind: 'merge', question: 'ok?' });
+  assert.equal(store.listGates()[0].pr_url, null);
+  store.updateRun(run.id, { pr_number: 7, pr_url: 'https://example.test/pull/7' });
+  assert.deepEqual(store.listGates().map((g) => [g.pr_number, g.pr_url]), [[7, 'https://example.test/pull/7']]);
+});

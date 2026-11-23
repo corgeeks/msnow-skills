@@ -24,7 +24,7 @@ test('e2e', { concurrency: 1 }, async (t) => {
     const f = await setupFactory(t);
     const { item, gate, run } = await toMergeGate(f);
     assert.equal(gate.kind, 'merge');
-    assert.equal(gate.question, `Merge PR #1 for #${item.id} add feature?`);
+    assert.equal(gate.question, `Merge PR #1 (https://github.com/fake/repo/pull/1) for #${item.id} add feature?`);
     assert.equal(f.store.getRun(run.id).status, 'paused');
     await f.decide(gate.id, 'approve');
     await waitFor(() => f.store.getItem(item.id).status === 'done' && f.store.getRetro(run.id));

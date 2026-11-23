@@ -156,7 +156,7 @@ test('happy path: merge gate, approve, merge, retro', async (t) => {
   assert.ok(run.cost_usd > 0);
   const [g] = f.store.listGates({ run_id: f.runId, open: true });
   assert.equal(g.kind, 'merge');
-  assert.equal(g.question, `Merge PR #7 for #${f.item.id} thing?`);
+  assert.equal(g.question, `Merge PR #7 (https://example.test/pull/7) for #${f.item.id} thing?`);
   assert.equal(g.recommendation, `approve — tests pass, ${config.roles.reviewer.anthropic} approved`);
   assert.ok(seen.some((a) => a.node === 'build' && a.run_id === f.runId && a.text === 'read a.txt'));
   const open = f.calls.find((c) => c[0] === 'openPr')![1] as { title: string; body: string };
