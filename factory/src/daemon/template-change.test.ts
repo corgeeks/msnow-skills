@@ -508,6 +508,22 @@ test('nextStep: spend is compared in micro-dollars, so float drift cannot miss t
   assert.equal(step([], [], { config: frac, itemCost: 0.015 }).kind, 'open_cost_gate');
 });
 
+test('recovery cost gate recommends the last completed review findings, not an interrupted row', async (t) => {
+  const f = setup(t);
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };
+  const out = JSON.stringify({ verdict: 'changes', findings: [{ severity: 'blocking', text: 'fix it' }] });
+  const done = f.store.createNodeRun({ run_id: f.runId, node: 'review', iteration: 1 });
+  f.store.transitionNodeRun(done.id, 'pending', 'running');
+  f.store.updateNodeRun(done.id, { output: out, cost_usd: 0.01 });
+  f.store.transitionNodeRun(done.id, 'running', 'completed');
+  const bad = f.store.createNodeRun({ run_id: f.runId, node: 'review', iteration: 2 });
+  f.store.transitionNodeRun(bad.id, 'pending', 'running');
+  f.store.updateNodeRun(bad.id, { output: INTERRUPTED });
+  f.store.transitionNodeRun(bad.id, 'running', 'failed');
+  await runChange(f.ctx);
+  assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].recommendation, '[blocking] fix it');
+});
+
 test('rejecting a cost gate cancels the item even when recovery left an interrupted node', async (t) => {
   const f = setup(t);
   f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };

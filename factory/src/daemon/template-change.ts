@@ -43,7 +43,7 @@ export const costGatePrefix = (itemId: number) => `Item #${itemId} has spent $`;
 export const isCostGate = (g: Gate, itemId: number) => g.kind === 'failure' && g.question.startsWith(costGatePrefix(itemId));
 // Spend and cap are compared in whole micro-dollars: float sums (ten $0.01 → 0.0999…) must not miss the cap, fractional-cent caps must survive.
 const micros = (usd: number) => Math.round(usd * 1e6);
-const spent = (usd: number) => String(+usd.toFixed(4)); // 0.0200000001 → 0.02
+const spent = (usd: number) => String(micros(usd) / 1e6); // the exact value enforced, e.g. 0.0200000001 → 0.02
 // Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
 const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
   .sort((a, b) => a.id - b.id).map((g) => `- (${g.kind} gate, ${g.decision}) ${g.note}`).join('\n');
@@ -364,7 +364,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       }
       case 'open_cost_gate': {
         const i = item();
-        const latestReview = lastRow(rows, 'review');
+        // An interrupted/failed review row has no verdict; the last completed one holds the findings.
+        const latestReview = rows.findLast((n) => n.node === 'review' && n.status === 'completed');
         const findings = reviewFindings(rows.filter((n) => n === latestReview));
         atomic(() => {
           setItem('active', 'blocked');
@@ -474,7 +475,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       const itemRuns = store.listRuns({ item_id: r.item_id });
       step = nextStep({
         run: r, nodeRuns: rows, gates, retro: store.getRetro(runId) !== undefined, config,
-        itemCost: itemRuns.reduce((sum, x) => sum + x.cost_usd, 0),
+        // Node costs are the source of truth; run.cost_usd is a derived total that may lag.
+        itemCost: itemRuns.flatMap((x) => store.listNodeRuns(x.id)).reduce((sum, n) => sum + n.cost_usd, 0),
         costApprovals: itemRuns.flatMap((x) => store.listRunGates(x.id)).filter((g) => g.decision === 'approve' && isCostGate(g, r.item_id)).length,
       });
       if (step.kind === 'done') return;
