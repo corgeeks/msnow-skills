@@ -93,6 +93,8 @@ test('nextStep: an overridden failure gate goes to pr at the latest test\'s SHA'
   const g = gate('review', 'failure', 'override', 'ok');
   assert.deepEqual(step(rows, [g]), { kind: 'pr', iteration: 2, override: { sha, gate: g } });
   assert.equal(step([...rows, nr('pr', 2, 'completed')], [g]).kind, 'open_merge_gate');
+  const pr = nr('pr', 2, 'failed', INTERRUPTED);
+  assert.deepEqual(step([...rows, pr], [g]), { kind: 'pr', iteration: 2, row: pr, override: { sha, gate: g } });
   const noSha = nr('test', 2, 'completed', 'exit 0\n');
   assert.throws(() => step([rows[0], noSha], [g]), /did not pass/);
 });

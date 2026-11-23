@@ -51,6 +51,15 @@ const lastRow = (rows: NodeRun[], node: string, iteration?: number) =>
 const buildIteration = (rows: NodeRun[]) => Math.max(0, ...rows.filter((n) => n.node === 'build').map((n) => n.iteration));
 const now = () => new Date().toISOString();
 
+/** Override context while the latest gate is an overridden failure gate; the tested SHA must still be recorded. */
+function overrideOf(rows: NodeRun[], gates: Gate[]): { sha: string; gate: Gate } | undefined {
+  const gate = latest(gates);
+  if (gate?.kind !== 'failure' || gate.decision !== 'override') return undefined;
+  const sha = testedSha(rows);
+  if (!sha) throw new Error(`gate ${gate.id} overridden but the latest test did not pass`);
+  return { sha, gate };
+}
+
 /** Pure: the next step for a run, derived only from persisted rows. First matching rule wins. */
 export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): Step {
   const interrupted = nodeRuns.find((n) => n.status === 'failed' && n.output === INTERRUPTED);
@@ -58,6 +67,7 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
     const { node, iteration } = interrupted;
     if (node === 'merge_gate') return { kind: 'revive', row: interrupted };
     if (node === 'build') return { kind: 'build', iteration, row: interrupted, resume: true };
+    if (node === 'pr') return { kind: 'pr', iteration, row: interrupted, override: overrideOf(nodeRuns, gates) };
     return { kind: node as 'test', iteration, row: interrupted };
   }
   if (run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed') return { kind: retro ? 'done' : 'retro' };
@@ -73,11 +83,8 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
     return g.decision === 'approve' ? { kind: 'merge', iteration: mg.iteration } : { kind: 'merge_reject' };
   }
   if (lastRow(nodeRuns, 'pr')?.status === 'completed') return { kind: 'open_merge_gate', iteration: it };
-  if (gate?.kind === 'failure' && gate.decision === 'override') {
-    const sha = testedSha(nodeRuns);
-    if (!sha) throw new Error(`gate ${gate.id} overridden but the latest test did not pass`);
-    return { kind: 'pr', iteration: it, override: { sha, gate } };
-  }
+  const override = overrideOf(nodeRuns, gates);
+  if (override) return { kind: 'pr', iteration: it, override };
   const review = lastRow(nodeRuns, 'review', it);
   const verdict = review?.status === 'completed' ? parse(review.output).verdict : undefined;
   if (verdict === 'approve') return { kind: 'pr', iteration: it };

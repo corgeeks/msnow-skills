@@ -7,6 +7,7 @@ import type { GateWithPr } from '@/lib/api';
 const DECISION = {
   approve: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
   reject: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
+  override: 'bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200',
   open: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
 };
 
