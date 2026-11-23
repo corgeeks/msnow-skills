@@ -336,25 +336,49 @@ test('error after a rejected merge gate fails the paused run and its merge_gate 
   assert.ok(existsSync(f.wt.path));
 });
 
-for (const [name, decision] of [['merge', 'approve'], ['merge reject', 'reject']] as const) {
-  test(`remote branch deletion error (${name}) keeps the worktree and local branch`, async (t) => {
+for (const [name, decision, status] of [['merge', 'approve', 'completed'], ['merge reject', 'reject', 'cancelled']] as const) {
+  test(`remote branch deletion error (${name}) comes after the outcome commits and keeps the worktree`, async (t) => {
     const f = setup(t);
     await runChange(f.ctx);
     f.decide(decision);
     forgeOf(f).deleteRemoteBranch = () => { throw new Error('push refused'); };
     await runChange(f.ctx);
-    failed(f, decision === 'approve' ? 'merge' : 'merge_gate', 'push refused');
+    assert.equal(f.store.getRun(f.runId).status, status);
+    assert.ok(f.store.getRetro(f.runId));
     assert.ok(existsSync(f.wt.path));
     assert.match(git(f.root, ['branch', '--list', f.wt.branch]), /factory\//);
   });
 }
+
+test('a failing gate-open write leaves no half-open failure gate', async (t) => {
+  const f = setup(t, { test_cmd: 'false' });
+  const real = f.store.openGate;
+  f.store.openGate = () => { throw new Error('db down'); };
+  await runChange(f.ctx);
+  f.store.openGate = real;
+  assert.equal(f.store.getItem(f.item.id).status, 'ready');
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.listGates({ run_id: f.runId }).length, 0);
+});
+
+test('an unexpected error in the retro write fails the run with a retro', async (t) => {
+  const f = setup(t);
+  await toMerge(f);
+  const real = f.store.recordRetro;
+  let once = true;
+  f.store.recordRetro = (r) => { if (once) { once = false; throw new Error('retro write'); } return real(r); };
+  await runChange(f.ctx);
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.getItem(f.item.id).status, 'ready');
+  assert.match(f.store.getRetro(f.runId)!.notes!, /errored: retro write/);
+});
 
 test('an unprintable thrown value still fails the run', async (t) => {
   const f = setup(t);
   await toMerge(f);
   forgeOf(f).prState = () => { throw Object.create(null); };
   await runChange(f.ctx);
-  failed(f, 'merge', 'unprintable thrown value');
+  failed(f, 'merge', 'unknown error');
 });
 
 test('a resumed run with no reviewer mapping records a failed review node', async (t) => {
