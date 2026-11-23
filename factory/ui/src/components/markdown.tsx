@@ -10,7 +10,7 @@ export function Markdown({ text }: { text: string }) {
         components={{
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
           table: ({ node: _node, ...props }) => (
-            <div className="overflow-x-auto">
+            <div className="w-0 min-w-full overflow-x-auto">
               <table {...props} />
             </div>
           ),
