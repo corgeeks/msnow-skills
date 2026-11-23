@@ -34,6 +34,9 @@ export type Step =
 
 type Out = { pre_sha?: string; head_sha?: string; verdict?: string; findings?: string[]; touches_factory?: boolean };
 const parse = (s: string | null | undefined): Out => { try { return JSON.parse(s ?? '') ?? {}; } catch { return {}; } };
+// Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
+const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
+  .sort((a, b) => a.id - b.id).map((g) => `- (${g.kind} gate, ${g.decision}) ${g.note}`).join('\n');
 const latest = (gates: Gate[]) => gates.reduce<Gate | undefined>((m, g) => (!m || g.id > m.id ? g : m), undefined);
 const lastRow = (rows: NodeRun[], node: string, iteration?: number) =>
   rows.findLast((n) => n.node === node && (iteration === undefined || n.iteration === iteration));
@@ -172,9 +175,9 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           ...common(i, w),
           prd_path: i.spec_path ? join(dirname(dirname(i.spec_path)), 'PRD.md') : '',
           iteration: s.iteration,
+          human_notes: humanNotes(gates),
           failure_output: failure?.output ?? '',
           review_findings: findings.map((f) => `- ${f}`).join('\n'),
-          gate_note: latest(gates.filter((g) => g.kind === 'failure' && g.decision === 'approve'))?.note ?? '',
           resume: s.resume === true,
         });
         const o = await session('build', prompt, model, w);
@@ -215,7 +218,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         };
         if (s.row) contain();
         const prompt = buildReviewerPrompt({
-          ...common(i, w), diff: git(w, ['diff', 'origin/main...HEAD']), test_output: lastRow(rows, 'test', s.iteration)?.output ?? '',
+          ...common(i, w), diff: git(w, ['diff', 'origin/main...HEAD']), test_output: lastRow(rows, 'test', s.iteration)?.output ?? '', human_notes: humanNotes(gates),
         });
         const o = await session('review', prompt, model, w);
         const v: Verdict = o.status === 'completed' ? parseVerdict(o.finalText) : { verdict: 'changes', findings: [`reviewer session ${o.status}`] };
@@ -350,7 +353,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       halt();
       const r = run();
       const rows = store.listNodeRuns(runId);
-      const gates = store.listGates({ run_id: runId });
+      const gates = store.listRunGates(runId);
       step = nextStep({ run: r, nodeRuns: rows, gates, retro: store.getRetro(runId) !== undefined, config });
       if (step.kind === 'done') return;
       await exec(step, r, rows, gates);

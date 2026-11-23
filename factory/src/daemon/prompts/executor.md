@@ -15,6 +15,11 @@ Spec file: `{{spec_path}}`
 {{/prd_path}}
 {{spec}}
 {{/spec_path}}
+{{#human_notes}}
+## Additional requirements from the human (these override the item body where they conflict)
+
+{{human_notes}}
+{{/human_notes}}
 {{#resume}}
 ## Resume
 
@@ -32,15 +37,10 @@ The previous iteration failed with this output. Fix the cause:
 {{#review_findings}}
 ## Rework: reviewer findings
 
-The reviewer requested these changes. Address every one:
+The reviewer requested these changes. Address every one, except where a finding conflicts with the human's additional requirements above (those take precedence; a finding they supersede is obsolete):
 
 {{review_findings}}
 {{/review_findings}}
-{{#gate_note}}
-## Rework: note from the human
-
-{{gate_note}}
-{{/gate_note}}
 ## Process
 
 1. **Read the specification** — understand the objective, context, acceptance criteria, implementation notes, and technical constraints.

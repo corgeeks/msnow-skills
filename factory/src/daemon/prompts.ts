@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs';
 export interface ExecutorVars {
   item_id: number; title: string; body: string; spec: string; spec_path: string; prd_path: string;
   test_cmd: string; iteration: number; failure_output: string; review_findings: string;
-  gate_note: string; resume: boolean;
+  human_notes: string; resume: boolean;
 }
 export interface ReviewerVars {
   item_id: number; title: string; body: string; spec: string; spec_path: string;
-  test_cmd: string; diff: string; test_output: string;
+  test_cmd: string; diff: string; test_output: string; human_notes: string;
 }
 export interface Verdict { verdict: 'approve' | 'changes'; findings: string[] }
 export const NO_VERDICT_FINDING = 'reviewer returned no parseable verdict';

@@ -119,9 +119,9 @@ flowchart LR
 
 | Node | Rule | Success when | `output` |
 |------|------|--------------|----------|
-| `build` | omp session at `roles.executor[tier]`; prompt from `prompts/executor.md` with the previous iteration's failure output, review findings, and the latest approved failure-gate note. The daemon then `commitAll`s as `factory: #<id> <title>`. | session `completed` **and** ≥ 1 commit ahead of `origin/main` | `{"head_sha"}` on success; else the failure reason |
+| `build` | omp session at `roles.executor[tier]`; prompt from `prompts/executor.md` with the previous iteration's failure output, review findings, and the human notes from every closed gate in the run (same ordered section as the reviewer prompt, each with its gate decision). The daemon then `commitAll`s as `factory: #<id> <title>`. | session `completed` **and** ≥ 1 commit ahead of `origin/main` | `{"head_sha"}` on success; else the failure reason |
 | `test` | `sh -c <test_cmd>` in the worktree, own process group, 10 min timeout | exit 0 | `exit <code>\n<last 200 lines>` |
-| `review` | omp session at `roles.reviewer[<author family>]`; prompt from `prompts/reviewer.md` with the diff `origin/main...HEAD` and test output | always `completed`; the verdict decides. Unparseable or failed session → `changes`. | `{"pre_sha","verdict","findings"}` |
+| `review` | omp session at `roles.reviewer[<author family>]`; prompt from `prompts/reviewer.md` with the diff `origin/main...HEAD`, test output, and the human notes from every closed gate in the run (identical ordered section to the executor prompt, each with its gate decision; these override the item body where they conflict) | always `completed`; the verdict decides. Unparseable or failed session → `changes`. | `{"pre_sha","verdict","findings"}` |
 | `pr` | push `--force-with-lease`, `gh pr create` (body: item body, spec, test tail, review), then the verdict as a PR comment. `pr_number`/`pr_url`/`head_sha` are stored right after create so a re-run never opens a duplicate. | | PR URL |
 | `merge_gate` | opens a `merge` gate; run → `paused`; node stays `running` until decided | approve | |
 | `merge` | `gh pr merge --squash --match-head-commit <head_sha>` (skipped if already `MERGED`), wait ≤ 30 s for `MERGED`, sync `.factory/main`, remove worktree + local branch, delete remote branch | | `{"touches_factory"}` |

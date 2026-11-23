@@ -12,6 +12,11 @@ Spec file: `{{spec_path}}`
 
 {{spec}}
 {{/spec_path}}
+{{#human_notes}}
+## Additional requirements from the human (these override the item body where they conflict)
+
+{{human_notes}}
+{{/human_notes}}
 ## Diff (`origin/main...HEAD`)
 
 ```diff
