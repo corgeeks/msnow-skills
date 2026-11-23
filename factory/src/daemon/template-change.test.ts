@@ -248,10 +248,24 @@ test('reviewer containment reverts commits and dirt but keeps the verdict', asyn
   await runChange(f.ctx);
   const out = JSON.parse(f.row('review', 1)!.output!);
   assert.equal(out.verdict, 'approve');
-  assert.deepEqual(out.findings, [REVERTED]);
+  assert.deepEqual(out.findings, [{ severity: 'advisory', text: REVERTED }]);
   assert.equal(worktrees.headSha(f.wt.path), out.pre_sha);
   assert.ok(worktrees.isClean(f.wt.path));
   assert.equal(f.store.getRun(f.runId).status, 'paused');
+});
+
+test('advisory findings go to the PR, not to rework', async (t) => {
+  const text = '```json\n{"verdict":"changes","findings":[{"severity":"advisory","text":"harden x"},{"severity":"advisory","text":"style y"}]}\n```';
+  const f = setup(t, { script: (c) => c.role === 'review' ? ['FAKE_OMP_SCENARIO=complete', `FAKE_OMP_TEXT=${text}`] : defaultScript(c) });
+  await runChange(f.ctx);
+  assert.equal(f.rows().filter((n) => n.node === 'build').length, 1);
+  assert.equal(JSON.parse(f.row('review', 1)!.output!).verdict, 'approve');
+  const body = (f.calls.find((c) => c[0] === 'openPr')![1] as { body: string }).body;
+  assert.ok(body.includes('### Advisory (not blocking)\n\n- harden x\n- style y'));
+  assert.ok((f.calls.find((c) => c[0] === 'commentPr')![2] as string).includes('Advisory (not blocking)'));
+  f.decide('approve');
+  await runChange(f.ctx);
+  assert.deepEqual(f.store.getRetro(f.runId)!.findings, ['[advisory] harden x', '[advisory] style y']);
 });
 
 test('a conflict (item cancelled externally) returns without further writes', async (t) => {

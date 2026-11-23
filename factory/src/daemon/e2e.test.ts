@@ -73,7 +73,7 @@ test('e2e', { concurrency: 1 }, async (t) => {
 
   await t.test('review changes then rework', async (t) => {
     const script: Script = (c) => c.role === 'review' && c.n === 1
-      ? { FAKE_OMP_SCENARIO: 'complete', FAKE_OMP_TEXT: '```json\n{"verdict":"changes","findings":["rename x"]}\n```' }
+      ? { FAKE_OMP_SCENARIO: 'complete', FAKE_OMP_TEXT: '```json\n{"verdict":"changes","findings":[{"severity":"blocking","text":"rename x"}]}\n```' }
       : defaultScript(c);
     const f = await setupFactory(t, { script });
     const { item, gate, run } = await toMergeGate(f);
@@ -85,7 +85,7 @@ test('e2e', { concurrency: 1 }, async (t) => {
     assert.deepEqual(Object.keys(f.gh().prs), ['1']);
     await f.decide(gate.id, 'approve');
     await waitFor(() => f.store.getItem(item.id).status === 'done' && f.store.getRetro(run.id));
-    assert.ok(f.store.getRetro(run.id)!.findings.includes('rename x'));
+    assert.ok(f.store.getRetro(run.id)!.findings.includes('[blocking] rename x'));
   });
 
   for (const decision of ['reject', 'approve'] as const) {
