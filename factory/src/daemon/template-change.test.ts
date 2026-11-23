@@ -496,3 +496,51 @@ test('item cost cap opens a failure gate before the next session; approving lets
   assert.equal(f.store.getItem(f.item.id).status, 'active');
   assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].kind, 'merge');
 });
+
+test('nextStep: spend is compared in micro-dollars, so float drift cannot miss the cap', () => {
+  const tenCents = Array.from({ length: 10 }, () => 0.01).reduce((a, b) => a + b);
+  assert.notEqual(tenCents, 0.1);
+  const cfg = { ...config, caps: { ...config.caps, itemCostUsd: 0.1 } };
+  assert.equal(step([], [], { config: cfg, itemCost: tenCents }).kind, 'open_cost_gate');
+  assert.equal(step([], [], { config: cfg, itemCost: 0.099 }).kind, 'build');
+  const frac = { ...config, caps: { ...config.caps, itemCostUsd: 0.015 } };
+  assert.equal(step([], [], { config: frac, itemCost: 0.014 }).kind, 'build');
+  assert.equal(step([], [], { config: frac, itemCost: 0.015 }).kind, 'open_cost_gate');
+});
+
+test('rejecting a cost gate cancels the item even when recovery left an interrupted node', async (t) => {
+  const f = setup(t);
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };
+  await runChange(f.ctx);
+  assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].question, `Item #${f.item.id} has spent $0.01 (cap $0.01). Continue?`);
+  // Restart recovery marks the node that was running when the daemon stopped.
+  const row = f.store.createNodeRun({ run_id: f.runId, node: 'review', iteration: 1 });
+  f.store.transitionNodeRun(row.id, 'pending', 'running');
+  f.store.updateNodeRun(row.id, { output: INTERRUPTED });
+  f.store.transitionNodeRun(row.id, 'running', 'failed');
+  f.decide('reject');
+  await runChange(f.ctx);
+  assert.equal(f.store.getItem(f.item.id).status, 'cancelled');
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.listGates({ run_id: f.runId }).length, 1);
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build']);
+  assert.ok(f.store.getRetro(f.runId));
+});
+
+test('spend reported by a session survives post-session failure and counts toward the next run', async (t) => {
+  const f = setup(t);
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };
+  f.ctx.worktrees = { ...worktrees, commitAll: () => { throw new Error('git broke'); } };
+  await runChange(f.ctx);
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.getRun(f.runId).cost_usd, 0.01);
+  assert.equal(f.row('build', 1)!.cost_usd, 0.01);
+
+  f.store.transitionItem(f.item.id, 'ready', 'active');
+  const r2 = f.store.createRun({ item_id: f.item.id, template: 'change', attempt: 2 });
+  f.store.updateRun(r2.id, { branch: f.wt.branch, worktree: f.wt.path });
+  f.store.transitionRun(r2.id, 'pending', 'running');
+  await runChange({ ...f.ctx, runId: r2.id });
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build']); // no second paid session
+  assert.match(f.store.listGates({ run_id: r2.id, open: true })[0].question, /has spent \$0\.01 \(cap \$0\.01\)/);
+});

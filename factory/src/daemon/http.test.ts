@@ -118,6 +118,16 @@ test('runs and gates; deciding twice → 409', async (t) => {
   assert.ok((await call('GET', '/api/events?after=0&limit=2')).json.length === 2);
 });
 
+test('override is a 400 on a cost gate', async (t) => {
+  const { call, store } = await setup(t);
+  const item = store.createItem({ title: 'g' });
+  const run = store.createRun({ item_id: item.id, template: 't' });
+  const gate = store.openGate({ run_id: run.id, node: 'build', kind: 'failure', question: `Item #${item.id} has spent $2 (cap $2). Continue?` });
+  const res = await call('POST', `/api/gates/${gate.id}/decision`, { decision: 'override' });
+  assert.deepEqual([res.status, res.json.error.code], [400, 'bad_request']);
+  assert.equal((await call('GET', '/api/gates?open=1')).json.length, 1);
+});
+
 test('SSE: live frames, activity without id, replay from Last-Event-ID', async (t) => {
   const { call, base, bus } = await setup(t);
   const live = await sse(`${base}/events`, 1, {}, async () => {

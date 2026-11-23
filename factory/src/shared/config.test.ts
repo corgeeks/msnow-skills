@@ -30,7 +30,7 @@ test('wrong type throws with path', () => {
 test('caps.itemCostUsd defaults to 2 and must be positive', () => {
   assert.equal(parseConfig({}).caps.itemCostUsd, 2);
   assert.equal(parseConfig({ caps: { itemCostUsd: 0.015 } }).caps.itemCostUsd, 0.015);
-  for (const v of [0, -1]) assert.throws(() => parseConfig({ caps: { itemCostUsd: v } }), /caps\.itemCostUsd/);
+  for (const v of [0, -1, 1e309]) assert.throws(() => parseConfig({ caps: { itemCostUsd: v } }), /caps\.itemCostUsd/);
 });
 
 test('committed .factory/config.json equals DEFAULT_CONFIG', () => {

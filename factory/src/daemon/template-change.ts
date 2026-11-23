@@ -41,6 +41,8 @@ const findingsOf = (s: string | null | undefined): Finding[] => (parse(s).findin
 // Cost gates are failure gates told apart by this question prefix; they must not raise the build/review attempt budgets.
 export const costGatePrefix = (itemId: number) => `Item #${itemId} has spent $`;
 export const isCostGate = (g: Gate, itemId: number) => g.kind === 'failure' && g.question.startsWith(costGatePrefix(itemId));
+// Spend and cap are compared in whole micro-dollars: float sums (ten $0.01 → 0.0999…) must not miss the cap, fractional-cent caps must survive.
+const micros = (usd: number) => Math.round(usd * 1e6);
 const spent = (usd: number) => String(+usd.toFixed(4)); // 0.0200000001 → 0.02
 // Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
 const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
@@ -71,10 +73,14 @@ export function nextStep(i: StepInput): Step {
   const s = derive(i);
   if (s.kind !== 'build' && s.kind !== 'review') return s;
   const cap = i.config.caps.itemCostUsd * (1 + i.costApprovals);
-  return i.itemCost >= cap ? { kind: 'open_cost_gate', node: s.kind, spent: i.itemCost, cap } : s;
+  return micros(i.itemCost) >= micros(cap) ? { kind: 'open_cost_gate', node: s.kind, spent: i.itemCost, cap } : s;
 }
 
 function derive({ run, nodeRuns, gates, retro, config }: StepInput): Step {
+  const terminal = run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed';
+  // A rejected cost gate ends the run even if recovery left an interrupted node behind: retrying it would only reopen the gate.
+  const last = latest(gates);
+  if (last && isCostGate(last, run.item_id) && last.decision === 'reject') return terminal ? { kind: retro ? 'done' : 'retro' } : { kind: 'failure_reject' };
   const interrupted = nodeRuns.find((n) => n.status === 'failed' && n.output === INTERRUPTED);
   if (interrupted) {
     const { node, iteration } = interrupted;
@@ -83,7 +89,7 @@ function derive({ run, nodeRuns, gates, retro, config }: StepInput): Step {
     if (node === 'pr') return { kind: 'pr', iteration, row: interrupted, override: overrideOf(nodeRuns, gates) };
     return { kind: node as 'test', iteration, row: interrupted };
   }
-  if (run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed') return { kind: retro ? 'done' : 'retro' };
+  if (terminal) return { kind: retro ? 'done' : 'retro' };
   const gate = latest(gates);
   if (gate && gate.closed_at === null) return { kind: 'wait' };
   if (nodeRuns.some((n) => n.node === 'merge' && n.status === 'completed')) return { kind: 'finalize' };
@@ -225,6 +231,9 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       timeoutMs: config.caps.sessionMinutes * 60_000, maxCostUsd: config.caps.sessionCostUsd,
       onActivity: (text) => bus.publishActivity({ run_id: runId, node, text, at: now() }),
     });
+    // Persisted before any fallible post-session work: reported spend must survive a later throw or stop.
+    store.updateNodeRun(cur!.id, { cost_usd: cur!.cost_usd + o.costUsd, session_file: o.sessionFile });
+    addCost();
     halt();
     return o;
   };
@@ -263,8 +272,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const output = ok ? JSON.stringify({ head_sha: wt.headSha(w) })
           : o.status === 'completed' ? 'no commits ahead of origin/main'
           : o.status === 'error' || o.status === 'crashed' ? `${o.status}: ${o.error}` : o.status;
-        end(ok ? 'completed' : 'failed', { output, cost_usd: cur!.cost_usd + o.costUsd, session_file: o.sessionFile });
-        addCost();
+        end(ok ? 'completed' : 'failed', { output });
         return;
       }
       case 'test': {
@@ -302,8 +310,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const v: Verdict = o.status === 'completed' ? parseVerdict(o.finalText) : { verdict: 'changes', findings: [{ severity: 'blocking', text: `reviewer session ${o.status}` }] };
         contain();
         if (reverted) v.findings.push({ severity: 'advisory', text: REVERTED });
-        end('completed', { output: JSON.stringify({ pre_sha: pre, ...v }), cost_usd: cur!.cost_usd + o.costUsd, session_file: o.sessionFile });
-        addCost();
+        end('completed', { output: JSON.stringify({ pre_sha: pre, ...v }) });
         return;
       }
       case 'pr': {

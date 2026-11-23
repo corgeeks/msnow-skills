@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { MIGRATIONS } from './db.ts';
 import { git } from './git.ts';
-import { testedSha } from './template-change.ts';
+import { isCostGate, testedSha } from './template-change.ts';
 import { ConflictError, CycleError, NotFoundError, type Store } from './store.ts';
 import type { Bus } from './bus.ts';
 import { ITEM_STATUSES, TIERS, type FactoryEvent } from '../shared/types.ts';
@@ -78,6 +78,7 @@ function checkOverride(store: Store, root: string, gateId: number): void {
   const gate = store.getGate(gateId);
   if (gate.kind !== 'failure') bad('override applies to failure gates only');
   const run = store.getRun(gate.run_id);
+  if (isCostGate(gate, run.item_id)) bad('override does not apply to cost gates: there is no review judgment to override');
   const sha = testedSha(store.listNodeRuns(run.id));
   if (!sha) bad('override needs a passing latest test with a recorded head_sha');
   let tip: string | undefined;

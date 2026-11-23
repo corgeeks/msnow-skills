@@ -44,7 +44,7 @@ function merge(def: unknown, raw: unknown, path: string): unknown {
 
 export function parseConfig(raw: unknown): Config {
   const c = merge(DEFAULT_CONFIG, raw, '') as Config;
-  if (!(c.caps.itemCostUsd > 0)) throw new Error('config: caps.itemCostUsd must be greater than 0');
+  if (!(Number.isFinite(c.caps.itemCostUsd) && c.caps.itemCostUsd > 0)) throw new Error('config: caps.itemCostUsd must be a finite number greater than 0');
   return c;
 }
 
