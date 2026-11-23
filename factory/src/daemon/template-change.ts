@@ -119,6 +119,11 @@ const reviewMarkdown = (model: string | null, v: Out) =>
 
 const STOP = Symbol('stopped');
 
+/** Message for a thrown value; String() itself can throw (e.g. `Object.create(null)`). */
+function errorMessage(e: unknown): string {
+  try { return String(e instanceof Error ? e.message : e); } catch { return 'unknown error'; }
+}
+
 /** Drives one `change` run until it is terminal or waiting on an open gate. Re-entrant: state lives in the store. */
 export async function runChange(ctx: ChangeContext): Promise<void> {
   const { store, bus, config, paths, forge, worktrees: wt, runId } = ctx;
@@ -142,6 +147,26 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
     (cur = row ? store.transitionNodeRun(row.id, 'failed', 'running')
       : store.transitionNodeRun(store.createNodeRun({ run_id: runId, node, iteration, model }).id, 'pending', 'running'));
   const end = (status: 'completed' | 'failed', p: NodeRunPatch = {}) => { close(cur!, status, p); cur = undefined; };
+  /** One store transaction; `cur` is restored on rollback so the failing node stays identifiable. */
+  const atomic = <T>(fn: () => T): T => {
+    const saved = cur;
+    try { return store.atomic(fn); } catch (e) { cur = saved; throw e; }
+  };
+  // Retro is part of terminalization: callers run it in the same transaction that makes the run terminal.
+  const reviewFindings = (rows: NodeRun[]) => rows.filter((n) => n.node === 'review').flatMap((n) => parse(n.output).findings ?? []);
+  const writeRetro = () => {
+    const rows = store.listNodeRuns(runId);
+    const findings = reviewFindings(rows);
+    const touches = parse(lastRow(rows, 'merge')?.output).touches_factory === true;
+    begin('retro', Math.max(1, buildIteration(rows)));
+    const retro = computeRetro(run(), rows, findings);
+    if (touches) {
+      retro.notes = RESTART_HINT;
+      console.log(RESTART_HINT);
+    }
+    store.recordRetro(retro);
+    end('completed');
+  };
   const addCost = () => store.updateRun(runId, { cost_usd: store.listNodeRuns(runId).reduce((s, n) => s + n.cost_usd, 0) });
 
   const session = async (node: 'build' | 'review', prompt: string, model: string, cwd: string) => {
@@ -204,8 +229,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const build = lastRow(rows, 'build', s.iteration)!;
         const family = (build.model ?? '').split('/')[0];
         const model = config.roles.reviewer[family];
+        begin('review', s.iteration, s.row, model); // recorded before the lookup can throw
         if (!model) throw new Error(`no reviewer mapped for model family '${family}'`);
-        begin('review', s.iteration, s.row, model);
         // The engine overwrites an interrupted row's output, so a re-run falls back to the build's recorded head.
         const pre = s.row ? parse(s.row.output).pre_sha ?? parse(build.output).head_sha ?? wt.headSha(w) : wt.headSha(w);
         store.updateNodeRun(cur!.id, { output: JSON.stringify({ pre_sha: pre }) });
@@ -230,11 +255,11 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       }
       case 'pr': {
         const i = item();
+        begin('pr', s.iteration, s.row);
         const review = lastRow(rows, 'review', s.iteration)!;
         const cmd = i.test_cmd ?? config.defaultTestCmd;
         const tail = (lastRow(rows, 'test', s.iteration)?.output ?? '').split('\n').slice(1).slice(-20).join('\n');
         const md = reviewMarkdown(review.model, parse(review.output));
-        begin('pr', s.iteration, s.row);
         await forge.pushBranch(w, r.branch!);
         halt();
         let n = r.pr_number;
@@ -254,24 +279,28 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       case 'open_merge_gate': {
         const i = item();
         cur = s.row ?? begin('merge_gate', s.iteration);
-        store.openGate({
-          run_id: runId, node: 'merge_gate', kind: 'merge',
-          question: `Merge PR #${r.pr_number} (${r.pr_url}) for #${i.id} ${i.title}?`,
-          recommendation: `approve — tests pass, ${lastRow(rows, 'review')?.model} approved`,
+        atomic(() => {
+          store.openGate({
+            run_id: runId, node: 'merge_gate', kind: 'merge',
+            question: `Merge PR #${r.pr_number} (${r.pr_url}) for #${i.id} ${i.title}?`,
+            recommendation: `approve — tests pass, ${lastRow(rows, 'review')?.model} approved`,
+          });
+          setRun('running', 'paused');
         });
-        setRun('running', 'paused');
         cur = undefined; // stays running until the gate is decided
         return;
       }
       case 'open_failure_gate': {
         const i = item();
-        setItem('active', 'blocked');
-        store.openGate({
-          run_id: runId, node: s.node, kind: 'failure',
-          question: `#${i.id} ${i.title}: ${s.node} failed ${s.count} times. Retry?`,
-          recommendation: `reject — inspect worktree ${w}`,
+        atomic(() => {
+          setItem('active', 'blocked');
+          store.openGate({
+            run_id: runId, node: s.node, kind: 'failure',
+            question: `#${i.id} ${i.title}: ${s.node} failed ${s.count} times. Retry?`,
+            recommendation: `reject — inspect worktree ${w}`,
+          });
+          setRun('running', 'paused');
         });
-        setRun('running', 'paused');
         return;
       }
       case 'wait': {
@@ -296,53 +325,54 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         halt();
         await forge.syncMain();
         halt();
-        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
-        await forge.deleteRemoteBranch(r.branch!);
-        halt();
         end('completed', { output: JSON.stringify({ touches_factory: touches }) });
-        return; // finalize is derived next
+        return; // finalize is derived next; it cleans up after everything that can fail the run has committed
       }
       case 'finalize': {
         const i = item();
-        setItem('active', 'done');
-        setRun('running', 'completed');
+        atomic(() => {
+          setItem('active', 'done');
+          setRun('running', 'completed');
+          writeRetro();
+        });
         await ctx.committer.flush(`merged #${i.id}`);
+        // Destructive cleanup last, each step only if not stopped: the run is already terminal.
+        halt();
+        await forge.deleteRemoteBranch(r.branch!);
+        halt();
+        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         return;
       }
       case 'merge_reject': {
         const g = latest(gates.filter((x) => x.node === 'merge_gate'))!;
         const n = r.pr_number!;
+        const mg = lastRow(rows, 'merge_gate');
+        if (mg?.status === 'running') cur = mg; // an unexpected error below fails this node too
         if ((await forge.prState(n)).state === 'OPEN') {
           halt();
           await forge.closePr(n, g.note ?? undefined);
         }
         halt();
-        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
+        atomic(() => {
+          if (mg?.status === 'running') end('failed');
+          setRun('paused', 'cancelled');
+          setItem('active', 'ready');
+          writeRetro(); // terminalization includes the retro: a stop during cleanup must not lose it
+        });
+        // Destructive cleanup after the outcome is committed, each step only if not stopped.
+        halt();
         await forge.deleteRemoteBranch(r.branch!);
         halt();
-        const mg = lastRow(rows, 'merge_gate');
-        if (mg?.status === 'running') close(mg, 'failed');
-        setRun('paused', 'cancelled');
-        setItem('active', 'ready');
+        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         return;
       }
       case 'failure_reject':
         setItem('blocked', 'cancelled');
         setRun('paused', 'failed');
         return;
-      case 'retro': {
-        const findings = rows.filter((n) => n.node === 'review').flatMap((n) => parse(n.output).findings ?? []);
-        const touches = parse(lastRow(rows, 'merge')?.output).touches_factory === true;
-        begin('retro', Math.max(1, it));
-        const retro = computeRetro(run(), rows, findings);
-        if (touches) {
-          retro.notes = RESTART_HINT;
-          console.log(RESTART_HINT);
-        }
-        store.recordRetro(retro);
-        end('completed');
+      case 'retro':
+        atomic(writeRetro);
         return;
-      }
       case 'done':
         return;
     }
@@ -360,14 +390,34 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       if (step.kind === 'wait' || step.kind === 'open_merge_gate' || step.kind === 'open_failure_gate') return;
     }
   } catch (e) {
-    if (e === STOP) return;
-    if (e instanceof ConflictError) {
-      console.error(`factory: run ${runId} ${step?.kind}: ${e.message}`);
+    if (e === STOP || ctx.stopped()) return; // restart recovery handles a stop
+    const message = errorMessage(e);
+    let conflict = false;
+    try { conflict = e instanceof ConflictError; } catch { /* exotic throwable: not a conflict */ }
+    if (conflict) {
+      console.error(`factory: run ${runId} ${step?.kind}: ${message}`);
       return;
     }
-    console.error(`factory: run ${runId} ${step?.kind} failed:`, e);
-    if (cur) {
-      try { close(cur, 'failed', { output: (e as Error).message }); } catch (e2) { console.error(`factory: run ${runId}: could not mark node run ${cur.id} failed:`, e2); }
+    console.error(`factory: run ${runId} ${step?.kind} failed: ${message}`);
+    // Fail fast: recovery is a new attempt (`factory start`), never an in-place retry.
+    try {
+      store.atomic(() => {
+        const node = cur?.node ?? step?.kind ?? 'unknown';
+        if (cur) close(cur, 'failed', { output: JSON.stringify({ error: message }) });
+        const from = run().status;
+        const live = from === 'running' || from === 'paused';
+        if (!live && store.getRetro(runId)) return; // terminal and retro recorded: nothing to fail
+        const rows = store.listNodeRuns(runId);
+        const retro = computeRetro(run(), rows, reviewFindings(rows));
+        retro.notes = `node ${node} errored: ${message}`;
+        store.recordRetro(retro);
+        if (!live) return; // e.g. cleanup after a committed outcome: the retro still records the error
+        const i = item();
+        if (i.status === 'active') store.transitionItem(i.id, 'active', 'ready');
+        setRun(from, 'failed'); // last: the dispatch slot is counted by 'running'
+      });
+    } catch (e2) {
+      console.error(`factory: run ${runId}: could not fail run: ${errorMessage(e2)}`);
     }
   }
 }

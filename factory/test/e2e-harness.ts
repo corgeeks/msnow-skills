@@ -98,10 +98,11 @@ export async function setupFactory(t: TestContext, opts: { script?: Script } = {
   const server = createApiServer({ store, bus, uiDir: paths.uiDir });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const port = (server.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
 
   const f = {
-    T, root, origin, paths, db, store, bus, forge, committer, config, prompts, engine: newEngine(), newEngine,
+    T, root, origin, port, paths, db, store, bus, forge, committer, config, prompts, engine: newEngine(), newEngine,
     sessionsSettled: () => counts.settled,
     waitFor,
     async decide(gateId: number, decision: 'approve' | 'reject', note?: string) {
