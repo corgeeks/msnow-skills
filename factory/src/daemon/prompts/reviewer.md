@@ -41,7 +41,7 @@ End your reply with exactly one fenced `json` block, and nothing after it:
 { "verdict": "approve" | "changes", "findings": [{ "severity": "blocking" | "advisory", "text": "..." }] }
 ```
 
-`findings` lists concrete, actionable problems (empty on approve). Each has a severity:
+`findings` lists concrete, actionable problems and notes. Each has a severity:
 
 - `blocking`: a correctness, security, data-loss, or spec-violation problem in this change.
 - `advisory`: everything else: hardening, style, hypothetical threats outside the stated threat model, follow-ups. Advisory findings go to the human at the merge gate and never trigger rework.

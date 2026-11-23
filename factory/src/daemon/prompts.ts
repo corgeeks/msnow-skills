@@ -52,9 +52,8 @@ export function parseVerdict(finalText: string): Verdict {
       || (typeof f === 'object' && f !== null && 'text' in f && typeof f.text === 'string' && 'severity' in f && (f.severity === 'blocking' || f.severity === 'advisory'));
     if ((j.verdict === 'approve' || j.verdict === 'changes') && Array.isArray(raw) && raw.every(valid)) {
       const findings: Finding[] = raw.map((f: string | Finding) => { const { severity, text } = asFinding(f); return { severity, text }; });
-      // `changes` needs at least one blocking finding; advisory-only is an approval.
-      const blocking = findings.some((f) => f.severity === 'blocking');
-      return { verdict: j.verdict === 'changes' && !blocking ? 'approve' : j.verdict, findings };
+      // The findings decide: any blocking finding means `changes` (even if the reviewer said `approve`); none means `approve`.
+      return { verdict: findings.some((f) => f.severity === 'blocking') ? 'changes' : 'approve', findings };
     }
   } catch {}
   return { verdict: 'changes', findings: [NO_VERDICT_FINDING] };

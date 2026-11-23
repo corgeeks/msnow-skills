@@ -115,11 +115,11 @@ function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tai
   return promise;
 }
 
-const reviewMarkdown = (model: string | null, v: Out) => {
-  const findings = (v.findings ?? []).map(asFinding);
+/** `advisory` spans every review round, so advisories from rounds that triggered rework still reach the human. */
+const reviewMarkdown = (model: string | null, v: Out, advisories: Finding[]) => {
   const list = (fs: Finding[]) => fs.map((f) => `- ${f.text}`);
-  const blocking = list(findings.filter((f) => f.severity === 'blocking'));
-  const advisory = list(findings.filter((f) => f.severity === 'advisory'));
+  const blocking = list((v.findings ?? []).map(asFinding).filter((f) => f.severity === 'blocking'));
+  const advisory = list(advisories);
   return [`## Review`, '', `Reviewer: ${model}`, `Verdict: **${v.verdict}**`,
     ...(blocking.length ? ['', ...blocking] : []),
     ...(advisory.length ? ['', '### Advisory (not blocking)', '', ...advisory] : [])].join('\n');
@@ -267,7 +267,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const review = lastRow(rows, 'review', s.iteration)!;
         const cmd = i.test_cmd ?? config.defaultTestCmd;
         const tail = (lastRow(rows, 'test', s.iteration)?.output ?? '').split('\n').slice(1).slice(-20).join('\n');
-        const md = reviewMarkdown(review.model, parse(review.output));
+        const md = reviewMarkdown(review.model, parse(review.output),
+          rows.filter((n) => n.node === 'review' && n.status === 'completed').flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'));
         await forge.pushBranch(w, r.branch!);
         halt();
         let n = r.pr_number;

@@ -67,6 +67,10 @@ test('parseVerdict severities', () => {
   // legacy plain strings count as blocking
   assert.deepEqual(changes(['a']), { verdict: 'changes', findings: [blocking('a')] });
   assert.deepEqual(changes(['a', advisory('b')]), { verdict: 'changes', findings: [blocking('a'), advisory('b')] });
+  // a blocking finding overrides an `approve` verdict
+  const approves = (findings: unknown[]) => parseVerdict(block(JSON.stringify({ verdict: 'approve', findings })));
+  assert.deepEqual(approves([blocking('a')]), { verdict: 'changes', findings: [blocking('a')] });
+  assert.deepEqual(approves(['a']), { verdict: 'changes', findings: [blocking('a')] });
   // unknown severity or missing text is unparseable
   assert.deepEqual(changes([{ severity: 'nit', text: 'a' }]), bad);
   assert.deepEqual(changes([{ severity: 'blocking' }]), bad);

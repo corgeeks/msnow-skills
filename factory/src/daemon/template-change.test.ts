@@ -268,6 +268,17 @@ test('advisory findings go to the PR, not to rework', async (t) => {
   assert.deepEqual(f.store.getRetro(f.runId)!.findings, ['[advisory] harden x', '[advisory] style y']);
 });
 
+test('advisories from a round that triggered rework still reach the PR', async (t) => {
+  const r1 = '```json\n{"verdict":"changes","findings":[{"severity":"blocking","text":"fix a"},{"severity":"advisory","text":"harden x"}]}\n```';
+  const f = setup(t, { script: (c) => c.role === 'review' && c.n === 1 ? ['FAKE_OMP_SCENARIO=complete', `FAKE_OMP_TEXT=${r1}`] : defaultScript(c) });
+  await runChange(f.ctx);
+  assert.equal(f.rows().filter((n) => n.node === 'build').length, 2);
+  const body = (f.calls.find((c) => c[0] === 'openPr')![1] as { body: string }).body;
+  assert.ok(body.includes('### Advisory (not blocking)\n\n- harden x'));
+  assert.ok(!body.includes('fix a'));
+  assert.ok((f.calls.find((c) => c[0] === 'commentPr')![2] as string).includes('- harden x'));
+});
+
 test('a conflict (item cancelled externally) returns without further writes', async (t) => {
   const f = setup(t, { script: () => { throw new Error('no session expected'); } });
   for (let i = 1; i <= 3; i++) {
