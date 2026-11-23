@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTime } from '@/lib/format';
-import type { Gate } from '@/lib/api';
+import type { GateWithPr } from '@/lib/api';
 
 const DECISION = {
   approve: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
@@ -10,7 +10,7 @@ const DECISION = {
   open: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
 };
 
-export function GateCard({ gate, context }: { gate: Gate; context?: ReactNode }) {
+export function GateCard({ gate, context }: { gate: GateWithPr; context?: ReactNode }) {
   const label = gate.closed_at === null ? 'open' : gate.decision ?? 'open';
   return (
     <Card size="sm">
@@ -23,7 +23,12 @@ export function GateCard({ gate, context }: { gate: Gate; context?: ReactNode })
         {context && <div className="text-muted-foreground text-sm">{context}</div>}
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <p className="whitespace-pre-wrap">{gate.question}</p>
+        <p className="whitespace-pre-wrap break-words">{gate.question}</p>
+        {gate.pr_url && (
+          <p className="break-all"><span className="font-medium">Pull request:</span>{' '}
+            <a href={gate.pr_url} target="_blank" rel="noreferrer" className="underline">{gate.pr_number === null ? gate.pr_url : `PR #${gate.pr_number}`}</a>
+          </p>
+        )}
         {gate.recommendation && <p className="whitespace-pre-wrap"><span className="font-medium">Recommendation:</span> {gate.recommendation}</p>}
         <p className="text-muted-foreground">
           Opened {formatTime(gate.opened_at)}

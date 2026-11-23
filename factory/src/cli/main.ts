@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { loadConfig } from '../shared/config.ts';
 import { resolvePaths } from '../daemon/paths.ts';
-import { TIERS, type BatchItem, type BatchResult, type Gate, type ItemDetail, type ItemSummary, type RunDetail } from '../shared/types.ts';
+import { TIERS, type BatchItem, type BatchResult, type GateWithPr, type ItemDetail, type ItemSummary, type RunDetail } from '../shared/types.ts';
 import { ApiError, createClient, DaemonUnreachableError, type Client } from './client.ts';
 import { buildImportBatch } from './import.ts';
 
@@ -89,7 +89,10 @@ export async function main(argv: string[]): Promise<number> {
         for (const { run, node_runs, gates } of runs) {
           out(`run #${run.id} ${run.status} attempt ${run.attempt}${run.pr_url ? ` ${run.pr_url}` : ''}`);
           for (const n of node_runs) out(`  ${n.node}#${n.iteration} ${n.status}${n.model ? ` ${n.model}` : ''}`);
-          for (const g of gates.filter((g) => !g.closed_at)) out(`  gate #${g.id} ${g.kind}: ${g.question}`);
+          for (const g of gates.filter((g) => !g.closed_at)) {
+            out(`  gate #${g.id} ${g.kind}: ${g.question}`);
+            if (g.pr_url) out(`    pr: ${g.pr_url}`);
+          }
         }
         return 0;
       }
@@ -135,7 +138,7 @@ export async function main(argv: string[]): Promise<number> {
 async function status(api: Client, json: boolean, pos: string[]): Promise<number> {
   if (pos.length) throw new UsageError('status takes no positional arguments');
   const items: ItemSummary[] = await api.get('/api/items');
-  const gates: Gate[] = await api.get('/api/gates?open=1');
+  const gates: GateWithPr[] = await api.get('/api/gates?open=1');
   const counts: Record<string, number> = {};
   for (const i of items) counts[i.status] = (counts[i.status] ?? 0) + 1;
   const active = [];
@@ -158,6 +161,7 @@ async function status(api: Client, json: boolean, pos: string[]): Promise<number
   for (const g of gates) {
     if (!runItem.has(g.run_id)) runItem.set(g.run_id, ((await api.get(`/api/runs/${g.run_id}`)) as RunDetail).run.item_id);
     out(`  gate #${g.id} item #${runItem.get(g.run_id)} ${g.kind}: ${g.question}`);
+    if (g.pr_url) out(`    pr: ${g.pr_url}`);
   }
   if (waiting.length) out('waiting on deps:');
   for (const w of waiting) out(`  #${w.id} ${w.title} (${w.open_deps} open)`);

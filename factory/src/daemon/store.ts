@@ -2,7 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { tx } from './db.ts';
 import type { Bus } from './bus.ts';
 import type {
-  BatchItem, BatchResult, EventType, FactoryEvent, Gate, GateDecision, ItemDetail, ItemStatus,
+  BatchItem, BatchResult, EventType, FactoryEvent, Gate, GateDecision, GateWithPr, ItemDetail, ItemStatus,
   ItemSummary, NodeRun, NodeStatus, Retro, Run, RunStatus, WorkItem,
 } from '../shared/types.ts';
 
@@ -293,10 +293,11 @@ export function createStore(db: DatabaseSync, bus: Bus) {
       });
     },
     /** open=true: open gates only. Otherwise open first, then closed by closed_at desc, max 100. */
-    listGates(f: { open?: boolean; run_id?: number } = {}): Gate[] {
-      return all<Gate>(
-        `SELECT * FROM gates WHERE (?1 IS NULL OR run_id = ?1) AND (?2 = 0 OR closed_at IS NULL)
-         ORDER BY closed_at IS NOT NULL, closed_at DESC, id LIMIT 100`,
+    listGates(f: { open?: boolean; run_id?: number } = {}): GateWithPr[] {
+      return all<GateWithPr>(
+        `SELECT g.*, r.pr_number, r.pr_url FROM gates g JOIN runs r ON r.id = g.run_id
+         WHERE (?1 IS NULL OR g.run_id = ?1) AND (?2 = 0 OR g.closed_at IS NULL)
+         ORDER BY g.closed_at IS NOT NULL, g.closed_at DESC, g.id LIMIT 100`,
         f.run_id ?? null, f.open ? 1 : 0);
     },
 
