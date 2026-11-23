@@ -58,7 +58,7 @@ export interface Config {
     executor: Record<Tier, string>;
     reviewer: Record<string, string>; // author model family -> reviewer model
   };
-  caps: { sessionMinutes: number; sessionCostUsd: number };
+  caps: { sessionMinutes: number; sessionCostUsd: number; itemCostUsd: number };
   loop: { maxBuildAttempts: number; maxReviewRounds: number; maxParallel: number };
   git: { stateCommitPrefix: string; stateCommitDebounceSec: number };
   defaultTestCmd: string;

@@ -27,11 +27,11 @@ export type Script = (call: { role: Role; n: number }) => Record<string, string>
 
 export const APPROVE = '```json\n{"verdict":"approve","findings":[]}\n```';
 export const defaultScript: Script = ({ role, n }): Record<string, string> => role === 'build'
-  ? { FAKE_OMP_SCENARIO: 'edit', FAKE_OMP_EDIT: `echo x > factory/feature-${n}.txt && git add -A && git commit -qm feat` }
+  ? { FAKE_OMP_SCENARIO: 'edit', FAKE_OMP_EDIT: `echo x > factory/feature-${n}.txt && git add -A && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm feat` }
   : { FAKE_OMP_SCENARIO: 'complete', FAKE_OMP_TEXT: APPROVE };
 
 export const gitOut = (cwd: string, args: string[]) =>
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' }).trim();
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' }).trim();
 
 export async function waitFor<T>(pred: () => T, timeoutMs = 15000): Promise<NonNullable<T>> {
   const end = Date.now() + timeoutMs;

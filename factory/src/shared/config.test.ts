@@ -27,6 +27,17 @@ test('wrong type throws with path', () => {
   assert.throws(() => parseConfig({ roles: { reviewer: { x: 1 } } }), /roles\.reviewer\.x/);
 });
 
+test('caps.itemCostUsd rejects caps finer than a micro-dollar', () => {
+  for (const v of [0.0000001, 0.0150001]) assert.throws(() => parseConfig({ caps: { itemCostUsd: v } }), /caps\.itemCostUsd/);
+  assert.equal(parseConfig({ caps: { itemCostUsd: 0.000001 } }).caps.itemCostUsd, 0.000001);
+});
+
+test('caps.itemCostUsd defaults to 2 and must be positive', () => {
+  assert.equal(parseConfig({}).caps.itemCostUsd, 2);
+  assert.equal(parseConfig({ caps: { itemCostUsd: 0.015 } }).caps.itemCostUsd, 0.015);
+  for (const v of [0, -1, 1e309]) assert.throws(() => parseConfig({ caps: { itemCostUsd: v } }), /caps\.itemCostUsd/);
+});
+
 test('committed .factory/config.json equals DEFAULT_CONFIG', () => {
   const path = join(import.meta.dirname, '../../../.factory/config.json');
   assert.deepEqual(loadConfig(path), DEFAULT_CONFIG);

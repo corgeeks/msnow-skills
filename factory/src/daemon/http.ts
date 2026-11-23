@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { MIGRATIONS } from './db.ts';
 import { git } from './git.ts';
-import { testedSha } from './template-change.ts';
+import { isCostGate, testedSha } from './template-change.ts';
 import { ConflictError, CycleError, NotFoundError, type Store } from './store.ts';
 import type { Bus } from './bus.ts';
 import { ITEM_STATUSES, TIERS, type FactoryEvent } from '../shared/types.ts';
@@ -73,11 +73,13 @@ function send(res: http.ServerResponse, status: number, v: unknown): void {
 const sendErr = (res: http.ServerResponse, status: number, code: string, message: string) =>
   send(res, status, { error: { code, message } });
 
-/** Override is allowed only if the run's latest test passed on exactly the commit the run branch points at. */
+/** Override is allowed only on review/test-budget gates, and only if the run's latest test passed on exactly the commit the run branch points at. */
 function checkOverride(store: Store, root: string, gateId: number): void {
   const gate = store.getGate(gateId);
   if (gate.kind !== 'failure') bad('override applies to failure gates only');
   const run = store.getRun(gate.run_id);
+  if (isCostGate(gate, run.item_id)) bad('override does not apply to cost gates: there is no review judgment to override');
+  if (gate.node !== 'review' && gate.node !== 'test') bad(`override applies to review/test-budget gates only, not ${gate.node}`);
   const sha = testedSha(store.listNodeRuns(run.id));
   if (!sha) bad('override needs a passing latest test with a recorded head_sha');
   let tip: string | undefined;

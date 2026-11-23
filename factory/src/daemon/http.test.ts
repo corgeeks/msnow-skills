@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { openDb } from './db.ts';
 import { createBus } from './bus.ts';
@@ -26,7 +27,7 @@ async function setup(t: { after: (fn: () => unknown) => void }, withIndex = true
     const res = await fetch(base + path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, json: await res.json() as any };
   };
-  return { store, bus, base, call };
+  return { store, bus, base, call, dir };
 }
 
 /** Reads SSE frames until `n` id'd frames arrived. */
@@ -116,6 +117,38 @@ test('runs and gates; deciding twice → 409', async (t) => {
   assert.deepEqual([again.status, again.json.error.code], [409, 'conflict']);
   assert.equal((await call('GET', '/api/gates?open=1')).json.length, 0);
   assert.ok((await call('GET', '/api/events?after=0&limit=2')).json.length === 2);
+});
+
+test('override is a 400 on a cost gate', async (t) => {
+  const { call, store } = await setup(t);
+  const item = store.createItem({ title: 'g' });
+  const run = store.createRun({ item_id: item.id, template: 't' });
+  const gate = store.openGate({ run_id: run.id, node: 'build', kind: 'failure', question: `Item #${item.id} has spent $2 (cap $2). Continue?` });
+  const res = await call('POST', `/api/gates/${gate.id}/decision`, { decision: 'override' });
+  assert.deepEqual([res.status, res.json.error.code], [400, 'bad_request']);
+  assert.equal((await call('GET', '/api/gates?open=1')).json.length, 1);
+});
+
+test('override is a 400 on a build-budget gate even when the branch is at the tested SHA', async (t) => {
+  const { call, store, dir } = await setup(t);
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('commit', '--allow-empty', '-qm', 'x');
+  git('branch', '-f', 'run-branch');
+  const sha = git('rev-parse', 'run-branch');
+  const item = store.createItem({ title: 'g' });
+  const run = store.createRun({ item_id: item.id, template: 't' });
+  store.updateRun(run.id, { branch: 'run-branch' });
+  const test = store.createNodeRun({ run_id: run.id, node: 'test' });
+  store.updateNodeRun(test.id, { output: JSON.stringify({ head_sha: sha }) });
+  store.transitionNodeRun(test.id, 'pending', 'running');
+  store.transitionNodeRun(test.id, 'running', 'completed');
+  const build = store.openGate({ run_id: run.id, node: 'build', kind: 'failure', question: 'Build failed 3 times. Continue?' });
+  const res = await call('POST', `/api/gates/${build.id}/decision`, { decision: 'override' });
+  assert.deepEqual([res.status, res.json.error.code], [400, 'bad_request']);
+  assert.equal(store.getGate(build.id).decision, null);
+  const review = store.openGate({ run_id: run.id, node: 'review', kind: 'failure', question: 'Review changes 3 times. Continue?' });
+  assert.equal((await call('POST', `/api/gates/${review.id}/decision`, { decision: 'override' })).status, 200);
 });
 
 test('SSE: live frames, activity without id, replay from Last-Event-ID', async (t) => {

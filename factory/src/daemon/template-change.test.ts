@@ -23,10 +23,10 @@ let seq = 0;
 const nr = (node: string, iteration: number, status: NodeRun['status'], output: string | null = null): NodeRun =>
   ({ id: ++seq, run_id: 1, node, iteration, status, output, model: null, cost_usd: 0 }) as NodeRun;
 const gate = (node: string, kind: string, decision: Gate['decision'] = null, note: string | null = null): Gate =>
-  ({ id: ++seq, run_id: 1, node, kind, decision, note, closed_at: decision ? 'x' : null }) as Gate;
+  ({ id: ++seq, run_id: 1, node, kind, question: 'q', decision, note, closed_at: decision ? 'x' : null }) as Gate;
 const verdict = (v: string) => JSON.stringify({ pre_sha: 'a', verdict: v, findings: [] });
 const step = (nodeRuns: NodeRun[], gates: Gate[] = [], o: Partial<StepInput> = {}) =>
-  nextStep({ run: baseRun, nodeRuns, gates, retro: false, config, ...o });
+  nextStep({ run: baseRun, nodeRuns, gates, retro: false, config, itemCost: 0, costApprovals: 0, ...o });
 const kind = (s: ReturnType<typeof nextStep>) => ({ ...s, row: undefined });
 const ok = (i: number) => [nr('build', i, 'completed'), nr('test', i, 'completed')];
 const failedTests = (from: number, to: number) =>
@@ -84,6 +84,19 @@ test('nextStep: build budget, failure gates, review rounds', () => {
   // Review rework does not consume build attempts: 2 failed tests across 4 iterations still rebuilds.
   const mixed = [...failedTests(1, 1), ...ok(2), nr('review', 2, 'completed', verdict('changes')), ...failedTests(3, 3)];
   assert.deepEqual(step(mixed), { kind: 'build', iteration: 4 });
+});
+
+test('nextStep: item spend at the cap opens a cost gate before a build or review; approvals raise the cap without raising attempt budgets', () => {
+  const cap = config.caps.itemCostUsd;
+  assert.deepEqual(step([], [], { itemCost: cap }), { kind: 'open_cost_gate', node: 'build', spent: cap, cap });
+  assert.deepEqual(step(ok(1), [], { itemCost: cap }), { kind: 'open_cost_gate', node: 'review', spent: cap, cap });
+  assert.equal(step([], [], { itemCost: cap - 0.01 }).kind, 'build');
+  assert.equal(step([...ok(1), nr('review', 1, 'completed', verdict('approve'))], [], { itemCost: 99 }).kind, 'pr'); // no session to start
+  assert.equal(step([], [], { itemCost: cap, costApprovals: 1 }).kind, 'build');
+  assert.equal(step([], [], { itemCost: 2 * cap, costApprovals: 1 }).kind, 'open_cost_gate');
+  const costGate = (decision: Gate['decision']) => ({ ...gate('build', 'failure', decision), question: `Item #1 has spent $2 (cap $2). Continue?` });
+  assert.deepEqual(step(failedTests(1, 3), [costGate('approve')]), { kind: 'open_failure_gate', node: 'test', count: 3 });
+  assert.deepEqual(step(ok(1), [costGate('reject')], { itemCost: cap }), { kind: 'failure_reject' });
 });
 
 test('nextStep: an overridden failure gate goes to pr at the latest test\'s SHA', () => {
@@ -450,4 +463,100 @@ test('merge reject records its retro with the cancellation; a stop during remote
   assert.equal(f.store.getItem(f.item.id).status, 'ready');
   assert.ok(f.store.getRetro(f.runId));
   assert.ok(existsSync(f.wt.path));
+});
+
+test('item cost cap opens a failure gate before the next session; approving lets work continue', async (t) => {
+  const changes = '```json\n{"verdict":"changes","findings":[{"severity":"blocking","text":"fix it"}]}\n```';
+  const script: Script = ({ role, n }) => role === 'build'
+    ? ['FAKE_OMP_SCENARIO=edit', `FAKE_OMP_EDIT=mkdir -p factory && echo ${n} > factory/f${n}.txt`]
+    : ['FAKE_OMP_SCENARIO=complete', `FAKE_OMP_TEXT=${n === 1 ? changes : approve}`];
+  const f = setup(t, { script });
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.015 } };
+  await runChange(f.ctx);
+
+  // build 1 and review 1 cost $0.01 each; the cap is crossed before build 2.
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build', 'review']);
+  const [g] = f.store.listGates({ run_id: f.runId, open: true });
+  assert.equal(g.kind, 'failure');
+  assert.equal(g.question, `Item #${f.item.id} has spent $0.02 (cap $0.015). Continue?`);
+  assert.equal(g.recommendation, '[blocking] fix it');
+  assert.equal(f.store.getItem(f.item.id).status, 'blocked');
+  assert.equal(f.store.getRun(f.runId).status, 'paused');
+
+  f.decide('approve'); // cap is now 0.03: build 2 runs, then spend reaches it before review 2
+  await runChange(f.ctx);
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build', 'review', 'build']);
+  assert.equal(f.store.getItem(f.item.id).status, 'blocked');
+  const [g2] = f.store.listGates({ run_id: f.runId, open: true });
+  assert.equal(g2.question, `Item #${f.item.id} has spent $0.03 (cap $0.03). Continue?`);
+
+  f.decide('approve');
+  await runChange(f.ctx);
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build', 'review', 'build', 'review']);
+  assert.equal(f.store.getItem(f.item.id).status, 'active');
+  assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].kind, 'merge');
+});
+
+test('nextStep: spend is compared in micro-dollars, so float drift cannot miss the cap', () => {
+  const tenCents = Array.from({ length: 10 }, () => 0.01).reduce((a, b) => a + b);
+  assert.notEqual(tenCents, 0.1);
+  const cfg = { ...config, caps: { ...config.caps, itemCostUsd: 0.1 } };
+  assert.equal(step([], [], { config: cfg, itemCost: tenCents }).kind, 'open_cost_gate');
+  assert.equal(step([], [], { config: cfg, itemCost: 0.099 }).kind, 'build');
+  const frac = { ...config, caps: { ...config.caps, itemCostUsd: 0.015 } };
+  assert.equal(step([], [], { config: frac, itemCost: 0.014 }).kind, 'build');
+  assert.equal(step([], [], { config: frac, itemCost: 0.015 }).kind, 'open_cost_gate');
+});
+
+test('recovery cost gate recommends the last completed review findings, not an interrupted row', async (t) => {
+  const f = setup(t);
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };
+  const out = JSON.stringify({ verdict: 'changes', findings: [{ severity: 'blocking', text: 'fix it' }] });
+  const done = f.store.createNodeRun({ run_id: f.runId, node: 'review', iteration: 1 });
+  f.store.transitionNodeRun(done.id, 'pending', 'running');
+  f.store.updateNodeRun(done.id, { output: out, cost_usd: 0.01 });
+  f.store.transitionNodeRun(done.id, 'running', 'completed');
+  const bad = f.store.createNodeRun({ run_id: f.runId, node: 'review', iteration: 2 });
+  f.store.transitionNodeRun(bad.id, 'pending', 'running');
+  f.store.updateNodeRun(bad.id, { output: INTERRUPTED });
+  f.store.transitionNodeRun(bad.id, 'running', 'failed');
+  await runChange(f.ctx);
+  assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].recommendation, '[blocking] fix it');
+});
+
+test('rejecting a cost gate cancels the item even when recovery left an interrupted node', async (t) => {
+  const f = setup(t);
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };
+  await runChange(f.ctx);
+  assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].question, `Item #${f.item.id} has spent $0.01 (cap $0.01). Continue?`);
+  // Restart recovery marks the node that was running when the daemon stopped.
+  const row = f.store.createNodeRun({ run_id: f.runId, node: 'review', iteration: 1 });
+  f.store.transitionNodeRun(row.id, 'pending', 'running');
+  f.store.updateNodeRun(row.id, { output: INTERRUPTED });
+  f.store.transitionNodeRun(row.id, 'running', 'failed');
+  f.decide('reject');
+  await runChange(f.ctx);
+  assert.equal(f.store.getItem(f.item.id).status, 'cancelled');
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.listGates({ run_id: f.runId }).length, 1);
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build']);
+  assert.ok(f.store.getRetro(f.runId));
+});
+
+test('spend reported by a session survives post-session failure and counts toward the next run', async (t) => {
+  const f = setup(t);
+  f.ctx.config = { ...config, caps: { ...config.caps, itemCostUsd: 0.01 } };
+  f.ctx.worktrees = { ...worktrees, commitAll: () => { throw new Error('git broke'); } };
+  await runChange(f.ctx);
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.getRun(f.runId).cost_usd, 0.01);
+  assert.equal(f.row('build', 1)!.cost_usd, 0.01);
+
+  f.store.transitionItem(f.item.id, 'ready', 'active');
+  const r2 = f.store.createRun({ item_id: f.item.id, template: 'change', attempt: 2 });
+  f.store.updateRun(r2.id, { branch: f.wt.branch, worktree: f.wt.path });
+  f.store.transitionRun(r2.id, 'pending', 'running');
+  await runChange({ ...f.ctx, runId: r2.id });
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build']); // no second paid session
+  assert.match(f.store.listGates({ run_id: r2.id, open: true })[0].question, /has spent \$0\.01 \(cap \$0\.01\)/);
 });
