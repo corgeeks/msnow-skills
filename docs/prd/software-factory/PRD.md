@@ -392,6 +392,15 @@ _The user's global config signs commits through 1Password SSH, which fails unatt
 
 Factory commits are unsigned (`commit.gpgsign=false` through `DAEMON_COMMIT_FLAGS`). The v0 build commits are unsigned too, limited to the `feat/software-factory` branch by `includeIf "onbranch:feat/software-factory"` in `.git/config` pointing at `.git/unsigned-feature-branch.inc`. Remove that include after the branch is merged.
 
+### Cutover decisions (PlanPRD, L3)
+
+_How does v0 land, who plans L4, what is the first self-hosted loop, and what happens to `docs/prd/`?_
+
+- v0 lands through a PR that the human merges with a merge commit.
+- L4 is planned in the harness with `factory add`. There are no YAML or spec docs for it, and the imported sf7–sf12 stubs are its parents.
+- The first self-hosted loop is the item "Document the factory in README.md".
+- `docs/prd/` is deleted after the import. Before that, its architecture and decisions are extracted into a living `docs/factory/architecture.md`. `.claude/prd-root` is kept.
+
 ### References
 
 - Source brief: `../../../software-factory.md`

@@ -47,7 +47,7 @@
     and retire YAML PRDs for this repo.
   plan_after_prior: true
   spec: ../sf6-self-hosting-cutover/PRD.md
-  status: draft
+  status: defined
 - name: L4 · v1 backlog (imported into the factory; never planned in YAML)
   description: v1 capabilities. Stub child PRDs are the import source for sf6; the
     factory plans and builds them.
