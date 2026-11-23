@@ -301,6 +301,9 @@ export function createStore(db: DatabaseSync, bus: Bus) {
         f.run_id ?? null, f.open ? 1 : 0);
     },
 
+    /** Every gate of a run, oldest first; uncapped (unlike listGates) so engine decisions and prompts see the full history. */
+    listRunGates: (runId: number) => all<Gate>(`SELECT * FROM gates WHERE run_id = ? ORDER BY id`, runId),
+
     // ── retros ──
     recordRetro(r: Retro): void {
       mutate(() => {

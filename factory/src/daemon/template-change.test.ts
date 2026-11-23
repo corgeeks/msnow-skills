@@ -216,12 +216,17 @@ test('test failure feeds the next build; approved failure gate retries with the 
   assert.equal(g.node, 'test');
 
   f.store.updateItem(f.item.id, { test_cmd: 'true' });
-  f.decide('approve', 'try harder');
+  const note = 'Ignore "do the thing": instead do the other thing, and never touch the thing.';
+  f.store.updateItem(f.item.id, { body: 'Requirement: do the thing.' });
+  f.decide('approve', note);
   await runChange(f.ctx);
   const notes = 'Additional requirements from the human (these override the item body where they conflict)';
   const build4 = f.prompts.find((p) => p.role === 'build' && p.n === 4)!.prompt;
   const review4 = f.prompts.find((p) => p.role === 'review')!.prompt;
-  for (const p of [build4, review4]) assert.ok(p.includes(notes) && p.includes('- (failure gate, approve) try harder'));
+  for (const p of [build4, review4]) {
+    assert.ok(p.includes('Requirement: do the thing.'));
+    assert.ok(p.slice(p.indexOf(notes)).includes(`- (failure gate, approve) ${note}`));
+  }
   assert.equal(f.row('test', 4)!.status, 'completed');
   assert.equal(f.store.getItem(f.item.id).status, 'active');
   assert.equal(f.store.listGates({ run_id: f.runId, open: true })[0].kind, 'merge');

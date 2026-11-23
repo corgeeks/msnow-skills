@@ -114,3 +114,13 @@ test('listGates carries the run PR', () => {
   store.updateRun(run.id, { pr_number: 7, pr_url: 'https://example.test/pull/7' });
   assert.deepEqual(store.listGates().map((g) => [g.pr_number, g.pr_url]), [[7, 'https://example.test/pull/7']]);
 });
+
+test('listRunGates is uncapped while listGates caps at 100', () => {
+  const { store } = setup();
+  const run = store.createRun({ item_id: store.createItem({ title: 'a' }).id, template: 't' });
+  for (let i = 0; i < 101; i++) store.decideGate(store.openGate({ run_id: run.id, node: 'merge', kind: 'merge', question: 'ok?' }).id, 'approve', `n${i}`);
+  assert.equal(store.listGates({ run_id: run.id }).length, 100);
+  const all = store.listRunGates(run.id);
+  assert.equal(all.length, 101);
+  assert.equal(all[0].note, 'n0');
+});

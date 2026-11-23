@@ -353,7 +353,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       halt();
       const r = run();
       const rows = store.listNodeRuns(runId);
-      const gates = store.listGates({ run_id: runId });
+      const gates = store.listRunGates(runId);
       step = nextStep({ run: r, nodeRuns: rows, gates, retro: store.getRetro(runId) !== undefined, config });
       if (step.kind === 'done') return;
       await exec(step, r, rows, gates);
