@@ -2,7 +2,7 @@
   description: Push feat/software-factory, open a PR with gh, human merges with a
     merge commit; then remove the branch-only unsigned includeIf and switch the user
     checkout to main.
-  status: defined
+  status: in-progress
   spec: specs/land-v0.md
 - name: Run the factory on itself
   description: Self-hosted loop and the design-doc extraction proceed in parallel
