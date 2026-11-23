@@ -37,7 +37,7 @@ The previous iteration failed with this output. Fix the cause:
 {{#review_findings}}
 ## Rework: reviewer findings
 
-The reviewer requested these changes. Address every one:
+The reviewer requested these changes. Address every one, except where a finding conflicts with the human's additional requirements above (those take precedence; a finding they supersede is obsolete):
 
 {{review_findings}}
 {{/review_findings}}
