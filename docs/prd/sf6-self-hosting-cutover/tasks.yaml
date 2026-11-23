@@ -2,7 +2,7 @@
   description: Push feat/software-factory, open a PR with gh, human merges with a
     merge commit; then remove the branch-only unsigned includeIf and switch the user
     checkout to main.
-  status: in-progress
+  status: completed
   spec: specs/land-v0.md
 - name: Run the factory on itself
   description: Self-hosted loop and the design-doc extraction proceed in parallel
@@ -17,7 +17,7 @@
     - name: Extract architecture doc
       description: Create docs/factory/architecture.md from the umbrella PRD's Architecture,
         Constraints and Discussion, with an ADR-style decision log.
-      status: defined
+      status: completed
       spec: specs/extract-architecture-doc.md
 - name: Import program and retire docs/prd
   description: factory import the umbrella, normalize sf6 and container statuses,
