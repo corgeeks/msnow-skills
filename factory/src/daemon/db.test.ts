@@ -14,9 +14,25 @@ test('migrations apply once; reopen is a no-op', () => {
   openDb(path).close();
   const db = openDb(path);
   assert.equal(schemaVersion(db), MIGRATIONS.length);
-  assert.equal(schemaVersion(db), 1);
   assert.equal((db.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode, 'wal');
   assert.equal((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys, 1);
+  db.close();
+});
+
+test('v2 migration keeps gates and allows decision override', () => {
+  const path = join(tmp(), 'f.db');
+  const old = new DatabaseSync(path);
+  old.exec(MIGRATIONS[0]);
+  old.exec(`INSERT INTO meta VALUES ('schema_version', '1');
+    INSERT INTO work_items (id, title) VALUES (1, 't');
+    INSERT INTO runs (id, item_id, template, attempt) VALUES (1, 1, 'change', 1);
+    INSERT INTO gates (id, run_id, node, kind, question, decision, closed_at) VALUES (5, 1, 'test', 'failure', 'q', 'approve', 'x'), (6, 1, 'merge_gate', 'merge', 'q', NULL, NULL)`);
+  old.close();
+  const db = openDb(path);
+  assert.deepEqual(db.prepare('SELECT id, decision FROM gates ORDER BY id').all().map((r) => ({ ...r })), [{ id: 5, decision: 'approve' }, { id: 6, decision: null }]);
+  db.prepare(`UPDATE gates SET decision = 'override' WHERE id = 6`).run();
+  assert.throws(() => db.prepare(`UPDATE gates SET decision = 'bogus' WHERE id = 6`).run());
+  assert.equal(count(db, 'sqlite_master WHERE name = \'gates_open\''), 1);
   db.close();
 });
 

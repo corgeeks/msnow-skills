@@ -291,6 +291,7 @@ export function createStore(db: DatabaseSync, bus: Bus) {
     listNodeRuns: (runId: number) => all<NodeRun>(`SELECT * FROM node_runs WHERE run_id = ? ORDER BY id`, runId),
 
     // ── gates ──
+    getGate,
     openGate(g: NewGate): Gate {
       return mutate(() => {
         const gate = one<Gate>(

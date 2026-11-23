@@ -2,6 +2,8 @@ import http from 'node:http';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { MIGRATIONS } from './db.ts';
+import { git } from './git.ts';
+import { testedSha } from './template-change.ts';
 import { ConflictError, CycleError, NotFoundError, type Store } from './store.ts';
 import type { Bus } from './bus.ts';
 import { ITEM_STATUSES, TIERS, type FactoryEvent } from '../shared/types.ts';
@@ -71,8 +73,20 @@ function send(res: http.ServerResponse, status: number, v: unknown): void {
 const sendErr = (res: http.ServerResponse, status: number, code: string, message: string) =>
   send(res, status, { error: { code, message } });
 
-export function createApiServer(opts: { store: Store; bus: Bus; uiDir: string }): http.Server {
-  const { store, bus } = opts;
+/** Override is allowed only if the run's latest test passed on exactly the commit the run branch points at. */
+function checkOverride(store: Store, root: string, gateId: number): void {
+  const gate = store.getGate(gateId);
+  if (gate.kind !== 'failure') bad('override applies to failure gates only');
+  const run = store.getRun(gate.run_id);
+  const sha = testedSha(store.listNodeRuns(run.id));
+  if (!sha) bad('override needs a passing latest test with a recorded head_sha');
+  let tip: string | undefined;
+  try { tip = git(root, ['rev-parse', '--verify', `refs/heads/${run.branch}`]); } catch { /* branch missing */ }
+  if (tip !== sha) bad(`branch ${run.branch} is at ${tip ?? 'nothing'}, not the tested commit ${sha}`);
+}
+
+export function createApiServer(opts: { store: Store; bus: Bus; uiDir: string; root: string }): http.Server {
+  const { store, bus, root } = opts;
   const uiDir = resolve(opts.uiDir);
 
   const routes: Route[] = [
@@ -157,8 +171,9 @@ export function createApiServer(opts: { store: Store; bus: Bus; uiDir: string })
     {
       method: 'POST', pattern: /^\/api\/gates\/(\d+)\/decision$/, handler: async ({ m, body }) => {
         const b = await body();
-        if (b.decision !== 'approve' && b.decision !== 'reject') bad('decision must be approve|reject');
+        if (b.decision !== 'approve' && b.decision !== 'reject' && b.decision !== 'override') bad('decision must be approve|reject|override');
         opt(b, 'note', isStr, 'a string');
+        if (b.decision === 'override') checkOverride(store, root, Number(m[1])); // before decideGate's closed-gate 409
         return store.decideGate(Number(m[1]), b.decision as never, b.note as string | undefined);
       },
     },

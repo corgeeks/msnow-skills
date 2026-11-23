@@ -21,6 +21,7 @@ commands:
   start <id...> | --all                   queue ready leaves (ready -> queued)
   approve <gate-id> [--note N]
   reject <gate-id> [--note N]
+  override <gate-id> [--note N]           failure gate only: skip to the merge gate with the last tested commit
 
 If \`factory\` is not on PATH: node factory/src/cli/main.ts <command>
 `;
@@ -45,6 +46,7 @@ const COMMANDS: Record<string, Opts> = {
   start: { all: { type: 'boolean' } },
   approve: { note: { type: 'string' } },
   reject: { note: { type: 'string' } },
+  override: { note: { type: 'string' } },
 };
 
 function int(s: string | undefined, what: string): number {
@@ -129,10 +131,10 @@ export async function main(argv: string[]): Promise<number> {
         return 0;
       }
       case 'start': return await start(api, v.all === true, pos);
-      case 'approve': case 'reject': {
+      case 'approve': case 'reject': case 'override': {
         const id = int(one('gate-id'), 'gate-id');
         await api.post(`/api/gates/${id}/decision`, { decision: cmd, note: v.note });
-        out(`gate ${id} ${cmd === 'approve' ? 'approved' : 'rejected'}`);
+        out(`gate ${id} ${{ approve: 'approved', reject: 'rejected', override: 'overridden' }[cmd]}`);
         return 0;
       }
     }

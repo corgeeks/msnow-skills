@@ -68,7 +68,10 @@ export function createForge(o: { root: string; mainWorktree: string; queue: Queu
     }),
     fetch: () => run(fetchNow),
     syncMain: () => run(syncNow),
-    pushBranch: (worktreePath: string, branch: string) => run(() => { git(worktreePath, ['push', '--force-with-lease', 'origin', branch]); }),
+    /** `sha` pushes exactly that commit to the branch (the override path); default pushes the branch tip. */
+    pushBranch: (worktreePath: string, branch: string, sha?: string) => run(() => {
+      git(worktreePath, ['push', '--force-with-lease', 'origin', sha ? `${sha}:refs/heads/${branch}` : branch]);
+    }),
     openPr: async (p: { branch: string; title: string; body: string }) => {
       const out = withBody(p.body, (f) => gh(['pr', 'create', '--base', 'main', '--head', p.branch, '--title', p.title, '--body-file', f]));
       const url = out.trim().split('\n').at(-1)!.trim();

@@ -71,6 +71,21 @@ CREATE TABLE retros (
   rework_count INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0,
   duration_s INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT ''
 );`,
+  // v2: gates.decision gains 'override'. SQLite cannot alter a CHECK, so rebuild the table (nothing references gates).
+  `CREATE TABLE gates_new (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  node TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  question TEXT NOT NULL, recommendation TEXT,
+  opened_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  closed_at TEXT, decision TEXT CHECK (decision IN ('approve','reject','override')), note TEXT
+);
+INSERT INTO gates_new (id, run_id, node, kind, question, recommendation, opened_at, closed_at, decision, note)
+  SELECT id, run_id, node, kind, question, recommendation, opened_at, closed_at, decision, note FROM gates;
+DROP TABLE gates;
+ALTER TABLE gates_new RENAME TO gates;
+CREATE INDEX gates_open ON gates(run_id) WHERE closed_at IS NULL;`,
 ];
 
 export function schemaVersion(db: DatabaseSync): number {

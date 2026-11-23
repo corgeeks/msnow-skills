@@ -26,7 +26,7 @@ if (!existsSync(paths.liveDb) && existsSync(paths.committedDb)) copyFileSync(pat
 const db = openDb(paths.liveDb);
 const bus = createBus();
 const store = createStore(db, bus);
-const server = createApiServer({ store, bus, uiDir: paths.uiDir });
+const server = createApiServer({ store, bus, uiDir: paths.uiDir, root: paths.root });
 
 // Take the instance lock before touching shared state: a losing second daemon must not reset .factory/main.
 try {

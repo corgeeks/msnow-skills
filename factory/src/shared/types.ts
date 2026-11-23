@@ -6,7 +6,7 @@ export const NODE_STATUSES = ['pending', 'running', 'completed', 'failed', 'skip
 export type NodeStatus = (typeof NODE_STATUSES)[number];
 export const TIERS = ['heavy', 'standard', 'light'] as const;
 export type Tier = (typeof TIERS)[number];
-export type GateDecision = 'approve' | 'reject';
+export type GateDecision = 'approve' | 'reject' | 'override';
 export type EventType =
   | 'item.created' | 'item.updated' | 'run.created' | 'run.updated'
   | 'node.updated' | 'gate.opened' | 'gate.closed' | 'retro.recorded';

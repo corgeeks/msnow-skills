@@ -95,24 +95,31 @@ export async function setupFactory(t: TestContext, opts: { script?: Script } = {
   };
   const newEngine = () => createEngine({ store, bus, config, paths, runSession: recordingRunSession, worktrees, forge, committer, tickMs: 50 });
 
-  const server = createApiServer({ store, bus, uiDir: paths.uiDir });
+  const server = createApiServer({ store, bus, uiDir: paths.uiDir, root });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const port = (server.address() as AddressInfo).port;
   const base = `http://127.0.0.1:${port}`;
 
   const f = {
-    T, root, origin, port, paths, db, store, bus, forge, committer, config, prompts, engine: newEngine(), newEngine,
+    T, root, origin, port, base, paths, db, store, bus, forge, committer, config, prompts, engine: newEngine(), newEngine,
     sessionsSettled: () => counts.settled,
     waitFor,
-    async decide(gateId: number, decision: 'approve' | 'reject', note?: string) {
+    async decide(gateId: number, decision: 'approve' | 'reject' | 'override', note?: string) {
       const res = await fetch(`${base}/api/gates/${gateId}/decision`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision, note }),
       });
       if (res.status !== 200) throw new Error(`decision ${res.status}: ${await res.text()}`);
       return res.json();
     },
-    gh(): { prs: Record<string, { state: string; branch: string }> } {
+    /** Raw decision call; unlike `decide` it returns non-200 responses instead of throwing. */
+    async rawDecide(gateId: number, decision: string, note?: string) {
+      const res = await fetch(`${base}/api/gates/${gateId}/decision`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision, note }),
+      });
+      return { status: res.status, json: await res.json() as { error?: { code: string; message: string } } };
+    },
+    gh(): { prs: Record<string, { state: string; branch: string; body: string; comments: string[] }> } {
       return existsSync(ghState) ? JSON.parse(readFileSync(ghState, 'utf8')) : { prs: {} };
     },
     nodes(runId: number) { return store.listNodeRuns(runId); },

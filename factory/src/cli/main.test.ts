@@ -21,7 +21,7 @@ before(async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-cli-'));
   const bus = createBus();
   store = createStore(openDb(path.join(dir, 'f.db')), bus);
-  server = createApiServer({ store, bus, uiDir: path.join(dir, 'ui') });
+  server = createApiServer({ store, bus, uiDir: path.join(dir, 'ui'), root: dir });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   port = String((server.address() as AddressInfo).port);
 });
@@ -110,6 +110,14 @@ test('approve/reject gates; second decision conflicts', async () => {
   assert.ok(store.listGates({ run_id: r.id }).every((g) => g.closed_at));
   assert.equal(await run('approve', String(g1.id)), 1);
   assert.match(stderr, /^conflict:/);
+});
+
+test('override of a merge gate is rejected by the daemon', async () => {
+  const item = await add('--title', 'OV');
+  const r = store.createRun({ item_id: item, template: 't' });
+  const g = store.openGate({ run_id: r.id, node: 'merge_gate', kind: 'merge', question: 'ok?' });
+  assert.equal(await run('override', String(g.id), '--note', 'n'), 1);
+  assert.match(stderr, /^bad_request: override applies to failure gates only/);
 });
 
 test('undep removes a dependency; missing edge exits 1', async () => {
