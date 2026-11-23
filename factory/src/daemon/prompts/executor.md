@@ -15,6 +15,11 @@ Spec file: `{{spec_path}}`
 {{/prd_path}}
 {{spec}}
 {{/spec_path}}
+{{#human_notes}}
+## Additional requirements from the human (these override the item body where they conflict)
+
+{{human_notes}}
+{{/human_notes}}
 {{#resume}}
 ## Resume
 
@@ -36,11 +41,6 @@ The reviewer requested these changes. Address every one:
 
 {{review_findings}}
 {{/review_findings}}
-{{#gate_note}}
-## Rework: note from the human
-
-{{gate_note}}
-{{/gate_note}}
 ## Process
 
 1. **Read the specification** — understand the objective, context, acceptance criteria, implementation notes, and technical constraints.

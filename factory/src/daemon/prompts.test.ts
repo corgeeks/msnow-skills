@@ -5,7 +5,7 @@ import { buildExecutorPrompt, buildReviewerPrompt, parseVerdict, render, NO_VERD
 const exec: ExecutorVars = {
   item_id: 7, title: 'Do thing', body: 'item body', spec: 'SPEC TEXT', spec_path: 'docs/prd/x/specs/a.md',
   prd_path: 'docs/prd/x/PRD.md', test_cmd: 'npm test', iteration: 1, failure_output: '', review_findings: '',
-  gate_note: '', resume: false,
+  human_notes: '', resume: false,
 };
 
 test('executor: no conditional sections when empty', () => {
@@ -18,7 +18,7 @@ test('executor: no conditional sections when empty', () => {
 });
 
 test('executor: resume and failure sections', () => {
-  const out = buildExecutorPrompt({ ...exec, resume: true, failure_output: 'BOOM 42', review_findings: '- fix x', gate_note: 'try y' });
+  const out = buildExecutorPrompt({ ...exec, resume: true, failure_output: 'BOOM 42', review_findings: '- fix x', human_notes: '- (failure gate, approve) try y' });
   assert.ok(out.includes('A previous session was interrupted'));
   assert.ok(out.includes('BOOM 42') && out.includes('- fix x') && out.includes('try y'));
   assert.ok(!out.includes('{{'));
@@ -34,7 +34,7 @@ test('unknown var throws', () => {
 });
 
 test('reviewer render', () => {
-  const out = buildReviewerPrompt({ item_id: 1, title: 't', body: 'b', spec: 's', spec_path: 'p', test_cmd: 'npm test', diff: '+added line', test_output: 'ok' });
+  const out = buildReviewerPrompt({ item_id: 1, title: 't', body: 'b', spec: 's', spec_path: 'p', test_cmd: 'npm test', diff: '+added line', test_output: 'ok', human_notes: '' });
   assert.ok(out.includes('+added line'));
   assert.ok(out.includes('Do not modify, create, or delete any files, and do not commit. Changes you make will be reverted and reported.'));
   assert.ok(out.includes('{ "verdict": "approve" | "changes", "findings": ["..."] }'));
