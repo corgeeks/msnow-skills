@@ -3,6 +3,15 @@ import { execFileSync } from 'node:child_process';
 // Daemon identity for every factory-made commit; unsigned (global signers block unattended).
 export const DAEMON_COMMIT_FLAGS = ['-c', 'user.name=factory', '-c', 'user.email=factory@localhost', '-c', 'commit.gpgsign=false'];
 
+/** Env overrides that turn off global commit/tag signing for every git child process. Appends after any existing GIT_CONFIG_COUNT entries so earlier config is kept (later entries win per key). */
+export function gitSigningOffEnv(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const start = Number.parseInt(base.GIT_CONFIG_COUNT ?? '', 10) || 0;
+  const pairs = [['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']];
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(start + pairs.length) };
+  pairs.forEach(([k, v], i) => { env[`GIT_CONFIG_KEY_${start + i}`] = k; env[`GIT_CONFIG_VALUE_${start + i}`] = v; });
+  return env;
+}
+
 export class GitError extends Error {
   stderr: string;
   args: string[];

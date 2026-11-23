@@ -9,7 +9,7 @@
     "node": ">=24.15"
   },
   "scripts": {
-    "test": "node --test 'src/**/*.test.ts'",
+    "test": "node --import ./test/git-isolation.ts --test 'src/**/*.test.ts'",
     "typecheck": "tsc -p tsconfig.json",
     "daemon": "node src/daemon/main.ts",
     "build:ui": "npm --prefix ui ci && npm --prefix ui run build"

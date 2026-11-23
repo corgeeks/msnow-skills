@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { git } from './git.ts';
+import { git, gitSigningOffEnv } from './git.ts';
 import { asFinding, buildExecutorPrompt, buildReviewerPrompt, parseVerdict, type Finding, type Verdict } from './prompts.ts';
 import { computeRetro, testText } from './retro.ts';
 import { ConflictError, type NodeRunPatch, type Store } from './store.ts';
@@ -136,7 +136,7 @@ function derive({ run, nodeRuns, gates, retro, config }: StepInput): Step {
 /** `sh -c cmd` in cwd; stdout+stderr interleaved; process group killed at the timeout. */
 function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tail: string }> {
   const { promise, resolve } = Promise.withResolvers<{ code: number | string; tail: string }>();
-  const child = spawn('sh', ['-c', cmd], { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('sh', ['-c', cmd], { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...gitSigningOffEnv() } });
   let out = '';
   let timedOut = false;
   const add = (c: string) => { out += c; if (out.length > 1 << 20) out = out.slice(-(1 << 19)); };
