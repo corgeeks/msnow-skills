@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { git } from './git.ts';
 import { asFinding, buildExecutorPrompt, buildReviewerPrompt, parseVerdict, type Finding, type Verdict } from './prompts.ts';
-import { computeRetro } from './retro.ts';
+import { computeRetro, testText } from './retro.ts';
 import { ConflictError, type NodeRunPatch, type Store } from './store.ts';
 import type { Bus } from './bus.ts';
 import type { Forge } from './forge.ts';
@@ -27,7 +27,8 @@ const TEST_TIMEOUT_MS = 10 * 60_000;
 export interface StepInput { run: Run; nodeRuns: NodeRun[]; gates: Gate[]; retro: boolean; config: Config }
 export type Step =
   | { kind: 'build'; iteration: number; row?: NodeRun; resume?: boolean }
-  | { kind: 'test' | 'review' | 'pr' | 'merge' | 'open_merge_gate'; iteration: number; row?: NodeRun }
+  | { kind: 'pr'; iteration: number; row?: NodeRun; override?: { sha: string; gate: Gate } } // override: failure gate overridden at this tested SHA
+  | { kind: 'test' | 'review' | 'merge' | 'open_merge_gate'; iteration: number; row?: NodeRun }
   | { kind: 'open_failure_gate'; node: 'build' | 'test' | 'review'; count: number }
   | { kind: 'revive'; row: NodeRun } // interrupted merge_gate row: back to running, then re-derive
   | { kind: 'wait' | 'finalize' | 'merge_reject' | 'failure_reject' | 'retro' | 'done' };
@@ -38,11 +39,26 @@ const findingsOf = (s: string | null | undefined): Finding[] => (parse(s).findin
 // Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
 const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
   .sort((a, b) => a.id - b.id).map((g) => `- (${g.kind} gate, ${g.decision}) ${g.note}`).join('\n');
+/** SHA a failure gate may be overridden to: set only if the run's latest test node passed and recorded a head_sha. */
+export function testedSha(rows: NodeRun[]): string | undefined {
+  const t = lastRow(rows, 'test');
+  const sha = t?.status === 'completed' ? parse(t.output).head_sha : undefined;
+  return typeof sha === 'string' && sha ? sha : undefined;
+}
 const latest = (gates: Gate[]) => gates.reduce<Gate | undefined>((m, g) => (!m || g.id > m.id ? g : m), undefined);
 const lastRow = (rows: NodeRun[], node: string, iteration?: number) =>
   rows.findLast((n) => n.node === node && (iteration === undefined || n.iteration === iteration));
 const buildIteration = (rows: NodeRun[]) => Math.max(0, ...rows.filter((n) => n.node === 'build').map((n) => n.iteration));
 const now = () => new Date().toISOString();
+
+/** Override context while the latest gate is an overridden failure gate; the tested SHA must still be recorded. */
+function overrideOf(rows: NodeRun[], gates: Gate[]): { sha: string; gate: Gate } | undefined {
+  const gate = latest(gates);
+  if (gate?.kind !== 'failure' || gate.decision !== 'override') return undefined;
+  const sha = testedSha(rows);
+  if (!sha) throw new Error(`gate ${gate.id} overridden but the latest test did not pass`);
+  return { sha, gate };
+}
 
 /** Pure: the next step for a run, derived only from persisted rows. First matching rule wins. */
 export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): Step {
@@ -51,6 +67,7 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
     const { node, iteration } = interrupted;
     if (node === 'merge_gate') return { kind: 'revive', row: interrupted };
     if (node === 'build') return { kind: 'build', iteration, row: interrupted, resume: true };
+    if (node === 'pr') return { kind: 'pr', iteration, row: interrupted, override: overrideOf(nodeRuns, gates) };
     return { kind: node as 'test', iteration, row: interrupted };
   }
   if (run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed') return { kind: retro ? 'done' : 'retro' };
@@ -66,6 +83,8 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
     return g.decision === 'approve' ? { kind: 'merge', iteration: mg.iteration } : { kind: 'merge_reject' };
   }
   if (lastRow(nodeRuns, 'pr')?.status === 'completed') return { kind: 'open_merge_gate', iteration: it };
+  const override = overrideOf(nodeRuns, gates);
+  if (override) return { kind: 'pr', iteration: it, override };
   const review = lastRow(nodeRuns, 'review', it);
   const verdict = review?.status === 'completed' ? parse(review.output).verdict : undefined;
   if (verdict === 'approve') return { kind: 'pr', iteration: it };
@@ -123,6 +142,16 @@ const reviewMarkdown = (model: string | null, v: Out, advisories: Finding[]) => 
   return [`## Review`, '', `Reviewer: ${model}`, `Verdict: **${v.verdict}**`,
     ...(blocking.length ? ['', ...blocking] : []),
     ...(advisory.length ? ['', '### Advisory (not blocking)', '', ...advisory] : [])].join('\n');
+};
+
+/** PR body/comment section for a failure gate overridden by the human: the note, every finding of the latest review, and advisories from earlier rounds. */
+const overrideMarkdown = (g: Gate, review: NodeRun | undefined, earlier: Finding[]) => {
+  const findings = [...findingsOf(review?.output).map((f) => `- [${f.severity}] ${f.text}`),
+    ...earlier.map((f) => `- [advisory, earlier round] ${f.text}`)];
+  return ['## Overridden by the human', '', `Failure gate #${g.id} (${g.node}) was overridden; the tested commit went straight to this PR.`, '',
+    `Note: ${g.note ?? '(none)'}`, '',
+    `### Latest review${review ? ` (${review.model}, verdict **${parse(review.output).verdict}**)` : ''}`, '',
+    ...(findings.length ? findings : ['- no findings'])].join('\n');
 };
 
 const STOP = Symbol('stopped');
@@ -203,13 +232,14 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         begin('build', s.iteration, s.row, model);
         const prev = (node: string) => rows.findLast((n) => n.iteration === s.iteration - 1 && n.node === node);
         const failure = [prev('build'), prev('test')].find((n) => n?.status === 'failed');
+        const failureOutput = failure?.node === 'test' ? testText(failure.output) : failure?.output ?? '';
         const findings = findingsOf(prev('review')?.output).filter((f) => f.severity === 'blocking');
         const prompt = buildExecutorPrompt({
           ...common(i, w),
           prd_path: i.spec_path ? join(dirname(dirname(i.spec_path)), 'PRD.md') : '',
           iteration: s.iteration,
           human_notes: humanNotes(gates),
-          failure_output: failure?.output ?? '',
+          failure_output: failureOutput,
           review_findings: findings.map((f) => `- ${f.text}`).join('\n'),
           resume: s.resume === true,
         });
@@ -227,9 +257,10 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       case 'test': {
         const i = item();
         begin('test', s.iteration, s.row);
+        const head_sha = wt.headSha(w); // sampled before the command: the SHA the result is about
         const t = await runTest(i.test_cmd ?? config.defaultTestCmd, w);
         halt();
-        end(t.code === 0 ? 'completed' : 'failed', { output: `exit ${t.code}\n${t.tail}` });
+        end(t.code === 0 ? 'completed' : 'failed', { output: JSON.stringify({ exit: t.code, head_sha, tail: t.tail }) });
         return;
       }
       case 'review': {
@@ -251,7 +282,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         };
         if (s.row) contain();
         const prompt = buildReviewerPrompt({
-          ...common(i, w), diff: git(w, ['diff', 'origin/main...HEAD']), test_output: lastRow(rows, 'test', s.iteration)?.output ?? '', human_notes: humanNotes(gates),
+          ...common(i, w), diff: git(w, ['diff', 'origin/main...HEAD']), test_output: testText(lastRow(rows, 'test', s.iteration)?.output ?? null), human_notes: humanNotes(gates),
         });
         const o = await session('review', prompt, model, w);
         const v: Verdict = o.status === 'completed' ? parseVerdict(o.finalText) : { verdict: 'changes', findings: [{ severity: 'blocking', text: `reviewer session ${o.status}` }] };
@@ -263,13 +294,17 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       }
       case 'pr': {
         const i = item();
+        const ov = s.override;
+        if (ov) resume(); // the failure gate left the item blocked and the run paused
         begin('pr', s.iteration, s.row);
-        const review = lastRow(rows, 'review', s.iteration)!;
         const cmd = i.test_cmd ?? config.defaultTestCmd;
-        const tail = (lastRow(rows, 'test', s.iteration)?.output ?? '').split('\n').slice(1).slice(-20).join('\n');
-        const md = reviewMarkdown(review.model, parse(review.output),
-          rows.filter((n) => n.node === 'review' && n.status === 'completed').flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'));
-        await forge.pushBranch(w, r.branch!);
+        const tail = testText(lastRow(rows, 'test', ov ? undefined : s.iteration)?.output ?? null).split('\n').slice(1).slice(-20).join('\n');
+        const review = lastRow(rows, 'review', ov ? undefined : s.iteration);
+        const md = ov ? overrideMarkdown(ov.gate, review,
+          rows.filter((n) => n.node === 'review' && n.status === 'completed' && n.id !== review?.id).flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'))
+          : reviewMarkdown(review!.model, parse(review!.output),
+            rows.filter((n) => n.node === 'review' && n.status === 'completed').flatMap((n) => findingsOf(n.output)).filter((f) => f.severity === 'advisory'));
+        await forge.pushBranch(w, r.branch!, ov?.sha);
         halt();
         let n = r.pr_number;
         if (n === null) {
@@ -277,8 +312,13 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           const pr = await forge.openPr({ branch: r.branch!, title: `#${i.id} ${i.title}`, body });
           n = pr.number;
           // Written before the stop check: losing the number would open a duplicate PR on re-run.
-          store.updateRun(runId, { pr_number: pr.number, pr_url: pr.url, head_sha: wt.headSha(w) });
+          store.updateRun(runId, { pr_number: pr.number, pr_url: pr.url, head_sha: ov?.sha ?? wt.headSha(w) });
           halt();
+        }
+        if (ov) {
+          const oid = (await forge.prState(n)).headRefOid;
+          halt();
+          if (oid !== ov.sha) throw new Error(`PR #${n} head ${oid} is not the tested SHA ${ov.sha}`);
         }
         await forge.commentPr(n, md);
         halt();
@@ -292,7 +332,9 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           store.openGate({
             run_id: runId, node: 'merge_gate', kind: 'merge',
             question: `Merge PR #${r.pr_number} (${r.pr_url}) for #${i.id} ${i.title}?`,
-            recommendation: `approve — tests pass, ${lastRow(rows, 'review')?.model} approved`,
+            recommendation: gates.some((g) => g.decision === 'override')
+              ? 'judge the PR — failure gate overridden by the human; unresolved review findings are listed on it'
+              : `approve — tests pass, ${lastRow(rows, 'review')?.model} approved`,
           });
           setRun('running', 'paused');
         });

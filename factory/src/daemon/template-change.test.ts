@@ -10,6 +10,7 @@ import * as worktrees from './worktrees.ts';
 import { DEFAULT_CONFIG } from '../shared/config.ts';
 import { INTERRUPTED, nextStep, RESTART_HINT, REVERTED, runChange, type ChangeContext, type StepInput } from './template-change.ts';
 import { git } from './git.ts';
+import { testText } from './retro.ts';
 import { makeRepos } from '../../test/fixtures/git-repos.ts';
 import type { Forge } from './forge.ts';
 import type { Activity, Gate, NodeRun, Run } from '../shared/types.ts';
@@ -83,6 +84,19 @@ test('nextStep: build budget, failure gates, review rounds', () => {
   // Review rework does not consume build attempts: 2 failed tests across 4 iterations still rebuilds.
   const mixed = [...failedTests(1, 1), ...ok(2), nr('review', 2, 'completed', verdict('changes')), ...failedTests(3, 3)];
   assert.deepEqual(step(mixed), { kind: 'build', iteration: 4 });
+});
+
+test('nextStep: an overridden failure gate goes to pr at the latest test\'s SHA', () => {
+  const sha = 'a'.repeat(40);
+  const passed = nr('test', 2, 'completed', JSON.stringify({ exit: 0, head_sha: sha, tail: '' }));
+  const rows = [nr('build', 1, 'completed'), nr('test', 1, 'failed', 'exit 1'), nr('build', 2, 'completed'), passed];
+  const g = gate('review', 'failure', 'override', 'ok');
+  assert.deepEqual(step(rows, [g]), { kind: 'pr', iteration: 2, override: { sha, gate: g } });
+  assert.equal(step([...rows, nr('pr', 2, 'completed')], [g]).kind, 'open_merge_gate');
+  const pr = nr('pr', 2, 'failed', INTERRUPTED);
+  assert.deepEqual(step([...rows, pr], [g]), { kind: 'pr', iteration: 2, row: pr, override: { sha, gate: g } });
+  const noSha = nr('test', 2, 'completed', 'exit 0\n');
+  assert.throws(() => step([rows[0], noSha], [g]), /did not pass/);
 });
 
 // ── runChange against a real store, worktree and fake-omp ──
@@ -211,8 +225,10 @@ test('build without commits fails; exhausted budget opens a failure gate; reject
 test('test failure feeds the next build; approved failure gate retries with the note; merge reject', async (t) => {
   const f = setup(t, { test_cmd: 'exit 1' });
   await runChange(f.ctx);
-  assert.match(f.row('test', 1)!.output!, /^exit 1/);
-  assert.ok(f.prompts.find((p) => p.role === 'build' && p.n === 2)!.prompt.includes(f.row('test', 1)!.output!));
+  const t1 = JSON.parse(f.row('test', 1)!.output!);
+  assert.equal(t1.exit, 1);
+  assert.match(t1.head_sha, /^[0-9a-f]{40}$/);
+  assert.ok(f.prompts.find((p) => p.role === 'build' && p.n === 2)!.prompt.includes(testText(f.row('test', 1)!.output!)));
   const [g] = f.store.listGates({ run_id: f.runId, open: true });
   assert.equal(g.node, 'test');
 

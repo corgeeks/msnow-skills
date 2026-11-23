@@ -1,12 +1,24 @@
 import type { NodeRun, Retro, Run } from '../shared/types.ts';
 
+/**
+ * Test node output as `exit <code>\n<tail>`. The node records JSON `{exit, head_sha, tail}`;
+ * anything else (rows written before that format) is returned as is.
+ */
+export function testText(output: string | null): string {
+  try {
+    const t = JSON.parse(output ?? '');
+    if (typeof t?.tail === 'string') return `exit ${t.exit}\n${t.tail}`;
+  } catch { /* legacy plain text */ }
+  return output ?? '';
+}
+
 // Pure summary of a finished run's rows. No clock, no I/O.
 export function computeRetro(run: Run, nodeRuns: NodeRun[], findings: string[]): Retro {
   const rows = nodeRuns.filter((n) => n.run_id === run.id)
     .sort((a, b) => a.iteration - b.iteration || a.id - b.id);
   const failures = rows
     .filter((n) => (n.node === 'build' || n.node === 'test') && n.status === 'failed')
-    .map((n) => `${n.node} #${n.iteration}: ${(n.output ?? '').split('\n')[0] || 'no output'}`.slice(0, 300));
+    .map((n) => `${n.node} #${n.iteration}: ${(n.node === 'test' ? testText(n.output) : n.output ?? '').split('\n')[0] || 'no output'}`.slice(0, 300));
   const builds = new Set(rows.filter((n) => n.node === 'build').map((n) => n.iteration)).size;
   const cost = rows.reduce((s, n) => s + n.cost_usd, 0);
   const lastNodeEnd = rows.reduce<number | null>((m, n) => {

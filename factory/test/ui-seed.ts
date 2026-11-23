@@ -16,7 +16,7 @@ const dir = mkdtempSync(join(tmpdir(), 'factory-ui-seed-'));
 const db = openDb(join(dir, 'factory.db'));
 const bus = createBus();
 const store = createStore(db, bus);
-const server = createApiServer({ store, bus, uiDir: join(import.meta.dirname, '../ui/dist') });
+const server = createApiServer({ store, bus, uiDir: join(import.meta.dirname, '../ui/dist'), root: import.meta.dirname });
 await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
 const base = `http://127.0.0.1:${port}`;
 

@@ -16,7 +16,7 @@ async function setup(t: { after: (fn: () => unknown) => void }, withIndex = true
   if (withIndex) writeFileSync(join(uiDir, 'index.html'), '<p>INDEX</p>');
   const bus = createBus();
   const store = createStore(openDb(join(dir, 'f.db')), bus);
-  const server = createApiServer({ store, bus, uiDir });
+  const server = createApiServer({ store, bus, uiDir, root: dir });
   assert.equal(server.listening, false);
   server.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));

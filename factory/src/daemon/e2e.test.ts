@@ -4,6 +4,7 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { main } from '../cli/main.ts';
 import { killAllSessions } from './omp.ts';
+import { testText } from './retro.ts';
 import { INTERRUPTED, RESTART_HINT } from './template-change.ts';
 import { APPROVE, defaultScript, gitOut, setupFactory, waitFor, type Script } from '../../test/e2e-harness.ts';
 
@@ -59,11 +60,11 @@ test('e2e', { concurrency: 1 }, async (t) => {
     const pick = (node: string, it: number) => rows.find((n) => n.node === node && n.iteration === it)!;
     assert.equal(pick('build', 1).status, 'completed');
     assert.equal(pick('test', 1).status, 'failed');
-    assert.match(pick('test', 1).output!, /^exit 1/);
+    assert.match(testText(pick('test', 1).output), /^exit 1/);
     assert.equal(pick('build', 2).status, 'completed');
     assert.equal(pick('test', 2).status, 'completed');
     const b2 = f.prompts.find((p) => p.role === 'build' && p.n === 2)!;
-    assert.ok(b2.prompt.includes(pick('test', 1).output!), 'build#2 prompt has test#1 output');
+    assert.ok(b2.prompt.includes(testText(pick('test', 1).output)), 'build#2 prompt has test#1 output');
     await f.decide(gate.id, 'approve');
     await waitFor(() => f.store.getItem(item.id).status === 'done' && f.store.getRetro(run.id));
     const retro = f.store.getRetro(run.id)!;
@@ -121,6 +122,109 @@ test('e2e', { concurrency: 1 }, async (t) => {
       assert.ok(f.prompts.find((p) => p.role === 'build' && p.n === 4)!.prompt.includes('try harder'));
     });
   }
+
+  const changes = (text: string): Script => (c) => c.role === 'review'
+    ? { FAKE_OMP_SCENARIO: 'complete', FAKE_OMP_TEXT: '```json\n{"verdict":"changes","findings":[{"severity":"blocking","text":"' + text + '"},{"severity":"advisory","text":"style r' + c.n + '"}]}\n```' }
+    : defaultScript(c);
+  const reviewGate = async (f: F) => {
+    const item = f.queueItem();
+    const gate = await openGate(f);
+    const run = await runOf(f, item.id);
+    assert.equal(gate.node, 'review');
+    return { item, gate, run };
+  };
+  const testedHead = (f: F, runId: number) => out(f.nodes(runId).findLast((n) => n.node === 'test')!.output).head_sha;
+
+  await t.test('override of a review-exhausted gate opens the PR and merge gate for the tested SHA', async (t) => {
+    const f = await setupFactory(t, { script: changes('rename x') });
+    const { item, gate, run } = await reviewGate(f);
+    const sha = testedHead(f, run.id);
+    assert.equal(f.git(['rev-parse', `refs/heads/factory/${item.id}-1`]), sha);
+    assert.equal((await f.rawDecide(gate.id, 'override', 'good enough')).status, 200);
+    const mg = await waitFor(() => f.store.listGates({ open: true }).find((g) => g.kind === 'merge'));
+    assert.equal(mg.run_id, run.id);
+    const r = f.store.getRun(run.id);
+    assert.equal(r.head_sha, sha);
+    assert.equal(f.store.getItem(item.id).status, 'active');
+    assert.equal(f.git(['ls-remote', 'origin', `factory/${item.id}-1`]).split(/\s/)[0], sha);
+    const pr = f.gh().prs['1'];
+    for (const text of [pr.body, pr.comments[0]]) {
+      assert.match(text, /Overridden by the human/);
+      assert.match(text, /Note: good enough/);
+      assert.match(text, /- \[blocking\] rename x/);
+      assert.match(text, /- \[advisory\] style r2/);
+      assert.match(text, /- \[advisory, earlier round\] style r1/);
+    }
+    assert.ok(!f.nodes(run.id).some((n) => n.node === 'build' && n.iteration === 3));
+    await f.decide(mg.id, 'approve');
+    await waitFor(() => f.store.getItem(item.id).status === 'done' && f.store.getRetro(run.id));
+  });
+
+  await t.test('override is a 400 when the latest test failed', async (t) => {
+    const f = await setupFactory(t);
+    writeFileSync(join(f.T, 'fail'), '');
+    const item = f.queueItem();
+    const gate = await openGate(f);
+    const res = await f.rawDecide(gate.id, 'override');
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error!.code, 'bad_request');
+    assert.equal(f.store.listGates({ open: true })[0].id, gate.id);
+    assert.equal(f.store.getItem(item.id).status, 'blocked');
+  });
+
+  await t.test('override is a 400 when the branch moved', async (t) => {
+    const f = await setupFactory(t, { script: changes('rename x') });
+    const { gate, run } = await reviewGate(f);
+    gitOut(f.store.getRun(run.id).worktree!, ['commit', '--allow-empty', '-qm', 'moved']);
+    assert.equal((await f.rawDecide(gate.id, 'override')).status, 400);
+    assert.equal(f.store.listGates({ open: true })[0].id, gate.id);
+  });
+
+  await t.test('override is a 400 on a merge gate, open or closed', async (t) => {
+    const f = await setupFactory(t);
+    const { gate } = await toMergeGate(f);
+    assert.equal((await f.rawDecide(gate.id, 'override')).status, 400);
+    await f.decide(gate.id, 'reject');
+    assert.equal((await f.rawDecide(gate.id, 'override')).status, 400);
+  });
+
+  await t.test('a PR head that is not the tested SHA fails the pr node', async (t) => {
+    const f = await setupFactory(t, { script: changes('rename x') });
+    const { item, gate, run } = await reviewGate(f);
+    const real = f.forge.prState;
+    f.forge.prState = async (n) => ({ ...(await real(n)), headRefOid: 'deadbeef' });
+    await f.decide(gate.id, 'override');
+    await waitFor(() => f.store.getRun(run.id).status === 'failed' && f.store.getRetro(run.id));
+    const pr = f.nodes(run.id).find((n) => n.node === 'pr')!;
+    assert.equal(pr.status, 'failed');
+    assert.match(out(pr.output).error, /not the tested SHA/);
+    assert.match(f.store.getRetro(run.id)!.notes, /^node pr errored: /);
+    assert.equal(f.store.getItem(item.id).status, 'ready');
+    assert.ok(!f.store.listGates({ open: true }).some((g) => g.kind === 'merge'));
+  });
+
+  await t.test('a restart after the PR opened keeps the override: a mismatched head still fails the pr node', async (t) => {
+    const f = await setupFactory(t, { script: changes('rename x') });
+    const { gate, run } = await reviewGate(f);
+    const realOpen = f.forge.openPr;
+    let stopping: Promise<void> | undefined;
+    f.forge.openPr = async (a) => { const pr = await realOpen(a); stopping = f.engine.stop(); return pr; };
+    await f.decide(gate.id, 'override', 'good enough');
+    await waitFor(() => stopping);
+    await stopping;
+    assert.equal(f.nodes(run.id).find((n) => n.node === 'pr')!.status, 'running');
+    f.forge.openPr = realOpen;
+    const real = f.forge.prState;
+    f.forge.prState = async (n) => ({ ...(await real(n)), headRefOid: 'deadbeef' });
+    f.engine = f.newEngine();
+    await f.engine.start();
+    await waitFor(() => f.store.getRun(run.id).status === 'failed' && f.store.getRetro(run.id));
+    const prs = f.nodes(run.id).filter((n) => n.node === 'pr');
+    assert.deepEqual(prs.map((n) => n.status), ['failed']);
+    assert.match(out(prs[0].output).error, /not the tested SHA/);
+    assert.equal(Object.keys(f.gh().prs).length, 1);
+    assert.ok(!f.store.listGates({ open: true }).some((g) => g.kind === 'merge'));
+  });
 
   await t.test('merge-gate reject', async (t) => {
     const f = await setupFactory(t);
