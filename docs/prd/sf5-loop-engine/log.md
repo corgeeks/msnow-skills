@@ -1,5 +1,19 @@
 # Implementation Log
 
+## 2026-11-22T16:03:15 - change loop state machine
+
+**Status**: Completed
+
+**Summary**: Added the re-entrant `change` state machine: pure `nextStep` derivation from persisted rows, plus `runChange` executing build/test/review/pr/merge_gate/merge/retro with gates, containment, CAS, and stop handling.
+
+**Changes Made**:
+- `factory/src/daemon/template-change.ts` - Created: `ChangeContext`, `INTERRUPTED`, `nextStep`, `runChange`
+- `factory/src/daemon/template-change.test.ts` - Created: nextStep rule tables and runChange tests on a real store/worktree with fake-omp and a recording forge
+
+**Notes**: Conflict with the engine spec: recovery overwrites an interrupted review row's `{pre_sha}` output with `INTERRUPTED`. To handle this, a successful build stores `{"head_sha"}` as its output, and a re-run review falls back to it. `pr_number`/`pr_url`/`head_sha` are written right after `openPr`, before the stop check, so a re-run cannot open a duplicate PR. Steps are idempotent so a crash between writes resumes cleanly: status changes are skipped when the target state is already reached, `closePr`/`mergePr` are guarded by `prState`, and `removeWorktree` only runs if the dir exists. `merge_gate` rows interrupted mid-transition are revived in place. Retro writes a `retro` node row. `ChangeContext.paths` is narrowed to `{root, sessionsDir}`, which the full paths object satisfies.
+
+---
+
 ## 2026-11-22T15:54:18 - Executor and reviewer prompts
 
 **Status**: Completed
