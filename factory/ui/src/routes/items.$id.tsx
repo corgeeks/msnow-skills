@@ -4,6 +4,7 @@ import { useResource } from '@/lib/events';
 import { formatCost, formatTime } from '@/lib/format';
 import { StatusBadge } from '@/components/status-badge';
 import { ItemList } from '@/components/items/item-list';
+import { Markdown } from '@/components/markdown';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
@@ -62,7 +63,7 @@ function Page() {
 
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Description</h2>
-        {item.body ? <pre className="whitespace-pre-wrap font-sans text-sm">{item.body}</pre> : <p className="text-muted-foreground">No description</p>}
+        {item.body ? <Markdown text={item.body} /> : <p className="text-muted-foreground">—</p>}
       </section>
 
       <div className="grid gap-6 md:grid-cols-3">
