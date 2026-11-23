@@ -8,7 +8,7 @@ export const DEFAULT_CONFIG: Config = {
     executor: { heavy: 'anthropic/claude-opus-5-5', standard: 'anthropic/claude-sonnet-5-5', light: 'anthropic/claude-haiku-5-5' },
     reviewer: { anthropic: 'openai-codex/gpt-6.2-sol', 'openai-codex': 'anthropic/claude-opus-5-5' },
   },
-  caps: { sessionMinutes: 30, sessionCostUsd: 5 },
+  caps: { sessionMinutes: 30, sessionCostUsd: 5, itemCostUsd: 2 },
   loop: { maxBuildAttempts: 3, maxReviewRounds: 2, maxParallel: 2 },
   git: { stateCommitPrefix: 'factory: state', stateCommitDebounceSec: 60 },
   defaultTestCmd: 'npm test --prefix factory',
@@ -43,7 +43,9 @@ function merge(def: unknown, raw: unknown, path: string): unknown {
 }
 
 export function parseConfig(raw: unknown): Config {
-  return merge(DEFAULT_CONFIG, raw, '') as Config;
+  const c = merge(DEFAULT_CONFIG, raw, '') as Config;
+  if (!(c.caps.itemCostUsd > 0)) throw new Error('config: caps.itemCostUsd must be greater than 0');
+  return c;
 }
 
 export function loadConfig(path: string): Config {

@@ -24,18 +24,24 @@ export const REVERTED = 'reviewer modified the worktree (reverted)';
 export const RESTART_HINT = 'daemon code changed on main — restart the daemon to pick it up';
 const TEST_TIMEOUT_MS = 10 * 60_000;
 
-export interface StepInput { run: Run; nodeRuns: NodeRun[]; gates: Gate[]; retro: boolean; config: Config }
+/** itemCost: spend across all of the item's runs; costApprovals: approved cost gates across them (each raises the item's cap by one `caps.itemCostUsd`). */
+export interface StepInput { run: Run; nodeRuns: NodeRun[]; gates: Gate[]; retro: boolean; config: Config; itemCost: number; costApprovals: number }
 export type Step =
   | { kind: 'build'; iteration: number; row?: NodeRun; resume?: boolean }
   | { kind: 'pr'; iteration: number; row?: NodeRun; override?: { sha: string; gate: Gate } } // override: failure gate overridden at this tested SHA
   | { kind: 'test' | 'review' | 'merge' | 'open_merge_gate'; iteration: number; row?: NodeRun }
   | { kind: 'open_failure_gate'; node: 'build' | 'test' | 'review'; count: number }
+  | { kind: 'open_cost_gate'; node: 'build' | 'review'; spent: number; cap: number }
   | { kind: 'revive'; row: NodeRun } // interrupted merge_gate row: back to running, then re-derive
   | { kind: 'wait' | 'finalize' | 'merge_reject' | 'failure_reject' | 'retro' | 'done' };
 
 type Out = { pre_sha?: string; head_sha?: string; verdict?: string; findings?: (string | Finding)[]; touches_factory?: boolean };
 const parse = (s: string | null | undefined): Out => { try { return JSON.parse(s ?? '') ?? {}; } catch { return {}; } };
 const findingsOf = (s: string | null | undefined): Finding[] => (parse(s).findings ?? []).map(asFinding);
+// Cost gates are failure gates told apart by this question prefix; they must not raise the build/review attempt budgets.
+export const costGatePrefix = (itemId: number) => `Item #${itemId} has spent $`;
+export const isCostGate = (g: Gate, itemId: number) => g.kind === 'failure' && g.question.startsWith(costGatePrefix(itemId));
+const spent = (usd: number) => String(+usd.toFixed(4)); // 0.0200000001 → 0.02
 // Closed gates' notes in order with their decision; identical text goes to executor and reviewer.
 const humanNotes = (gates: Gate[]) => gates.filter((g) => g.decision && g.note)
   .sort((a, b) => a.id - b.id).map((g) => `- (${g.kind} gate, ${g.decision}) ${g.note}`).join('\n');
@@ -60,8 +66,15 @@ function overrideOf(rows: NodeRun[], gates: Gate[]): { sha: string; gate: Gate }
   return { sha, gate };
 }
 
-/** Pure: the next step for a run, derived only from persisted rows. First matching rule wins. */
-export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): Step {
+/** Pure: the next step for a run, derived only from persisted rows. A build or review session is replaced by a cost gate once the item's spend reaches its cap. */
+export function nextStep(i: StepInput): Step {
+  const s = derive(i);
+  if (s.kind !== 'build' && s.kind !== 'review') return s;
+  const cap = i.config.caps.itemCostUsd * (1 + i.costApprovals);
+  return i.itemCost >= cap ? { kind: 'open_cost_gate', node: s.kind, spent: i.itemCost, cap } : s;
+}
+
+function derive({ run, nodeRuns, gates, retro, config }: StepInput): Step {
   const interrupted = nodeRuns.find((n) => n.status === 'failed' && n.output === INTERRUPTED);
   if (interrupted) {
     const { node, iteration } = interrupted;
@@ -97,7 +110,7 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
   if (test?.status === 'completed' && (!review || review.status === 'failed')) return { kind: 'review', iteration: it };
 
   const approved = (nodes: string[]) =>
-    gates.filter((g) => g.kind === 'failure' && g.decision === 'approve' && nodes.includes(g.node)).length;
+    gates.filter((g) => g.kind === 'failure' && g.decision === 'approve' && nodes.includes(g.node) && !isCostGate(g, run.item_id)).length;
   if (build.status === 'failed' || test?.status === 'failed') {
     const failed = new Set(nodeRuns.filter((n) => (n.node === 'build' || n.node === 'test') && n.status === 'failed')
       .map((n) => n.iteration)).size;
@@ -264,6 +277,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         return;
       }
       case 'review': {
+        resume(); // a cost gate may have left the item blocked and the run paused before this review
         const i = item();
         const build = lastRow(rows, 'build', s.iteration)!;
         const family = (build.model ?? '').split('/')[0];
@@ -339,6 +353,21 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           setRun('running', 'paused');
         });
         cur = undefined; // stays running until the gate is decided
+        return;
+      }
+      case 'open_cost_gate': {
+        const i = item();
+        const latestReview = lastRow(rows, 'review');
+        const findings = reviewFindings(rows.filter((n) => n === latestReview));
+        atomic(() => {
+          setItem('active', 'blocked');
+          store.openGate({
+            run_id: runId, node: s.node, kind: 'failure',
+            question: `${costGatePrefix(i.id)}${spent(s.spent)} (cap $${spent(s.cap)}). Continue?`,
+            recommendation: findings.length ? findings.join('\n') : `no review findings — inspect worktree ${w}`,
+          });
+          setRun('running', 'paused');
+        });
         return;
       }
       case 'open_failure_gate': {
@@ -435,10 +464,15 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       const r = run();
       const rows = store.listNodeRuns(runId);
       const gates = store.listRunGates(runId);
-      step = nextStep({ run: r, nodeRuns: rows, gates, retro: store.getRetro(runId) !== undefined, config });
+      const itemRuns = store.listRuns({ item_id: r.item_id });
+      step = nextStep({
+        run: r, nodeRuns: rows, gates, retro: store.getRetro(runId) !== undefined, config,
+        itemCost: itemRuns.reduce((sum, x) => sum + x.cost_usd, 0),
+        costApprovals: itemRuns.flatMap((x) => store.listRunGates(x.id)).filter((g) => g.decision === 'approve' && isCostGate(g, r.item_id)).length,
+      });
       if (step.kind === 'done') return;
       await exec(step, r, rows, gates);
-      if (step.kind === 'wait' || step.kind === 'open_merge_gate' || step.kind === 'open_failure_gate') return;
+      if (step.kind === 'wait' || step.kind === 'open_merge_gate' || step.kind === 'open_failure_gate' || step.kind === 'open_cost_gate') return;
     }
   } catch (e) {
     if (e === STOP || ctx.stopped()) return; // restart recovery handles a stop

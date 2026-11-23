@@ -84,6 +84,7 @@ export async function main(argv: string[]): Promise<number> {
         const it = d.item;
         out(`#${it.id} ${it.type} ${it.title} [${it.status}]`);
         out(`  parent: ${it.parent_id ?? '-'}  tier: ${it.tier ?? '-'}  priority: ${it.priority}  source: ${it.source_ref ?? '-'}`);
+        out(`  spent: $${d.runs.reduce((sum, r) => sum + r.cost_usd, 0).toFixed(2)}`);
         if (it.spec_path) out(`  spec: ${it.spec_path}`);
         if (it.test_cmd) out(`  test: ${it.test_cmd}`);
         if (it.body) out(`  body: ${it.body.split('\n').join('\n        ')}`);
