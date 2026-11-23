@@ -115,6 +115,9 @@ export function createStore(db: DatabaseSync, bus: Bus) {
   }
 
   return {
+    /** Runs `fn` as one transaction; events from its writes publish after commit. */
+    atomic: mutate,
+
     // ── items ──
     createItem(i: NewItem): WorkItem {
       return mutate(() => {

@@ -10,7 +10,7 @@ import { runSession } from './omp.ts';
 import * as worktrees from './worktrees.ts';
 import { DEFAULT_CONFIG } from '../shared/config.ts';
 import { createEngine, validateReviewerMapping } from './engine.ts';
-import { INTERRUPTED, type ChangeContext } from './template-change.ts';
+import { INTERRUPTED, runChange as realRunChange, type ChangeContext } from './template-change.ts';
 import { makeRepos } from '../../test/fixtures/git-repos.ts';
 import type { Forge } from './forge.ts';
 
@@ -18,7 +18,7 @@ async function until(cond: () => boolean, ms = 3000) {
   for (const end = Date.now() + ms; !cond(); await sleep(10)) if (Date.now() > end) throw new Error('timed out');
 }
 
-function setup(t: TestContext, maxParallel = 2) {
+function setup(t: TestContext, maxParallel = 2, failFirst = false) {
   const repos = makeRepos();
   const db = openDb(join(repos.dir, 'f.db'));
   const bus = createBus();
@@ -29,6 +29,8 @@ function setup(t: TestContext, maxParallel = 2) {
   const runChange = (ctx: ChangeContext) => {
     const { promise, resolve } = Promise.withResolvers<void>();
     calls.push({ ctx, resolve });
+    // Real runChange whose build session throws unexpectedly; later calls hang like the stub.
+    if (failFirst && calls.length === 1) return realRunChange({ ...ctx, runSession: () => { throw new Error('boom'); } });
     return promise;
   };
   const forge = { fetch: async () => {} } as unknown as Forge;
@@ -170,4 +172,20 @@ test('stop() does not wait for runs and silences the engine', async (t) => {
   await sleep(30);
   assert.equal(calls.length, 1);
   assert.equal(store.getItem(late.id).status, 'queued');
+});
+
+test('an unexpected node error frees the slot; factory start makes attempt 2', async (t) => {
+  const { store, engine, calls } = setup(t, 1, true);
+  const [a, b] = ['a', 'b'].map((title) => store.createItem({ title, status: 'queued' }));
+  await engine.start();
+  await until(() => calls.length === 2); // b dispatched at maxParallel 1 once a's run failed
+  assert.equal(store.getRun(1).status, 'failed');
+  assert.equal(store.getItem(a.id).status, 'ready');
+  assert.equal(store.getItem(b.id).status, 'active');
+  assert.equal(store.getRetro(1)?.notes, 'node build errored: boom');
+  calls[1].resolve();
+  store.transitionRun(calls[1].ctx.runId, 'running', 'completed');
+  store.transitionItem(a.id, 'ready', 'queued'); // factory start
+  await until(() => calls.length === 3);
+  assert.equal(store.getRun(calls[2].ctx.runId).attempt, 2);
 });

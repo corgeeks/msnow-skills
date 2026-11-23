@@ -147,6 +147,8 @@ flowchart LR
 
 **Dispatch** (`engine.ts`): a tick runs on every `item.updated`, `gate.closed`, or `run.updated` event and every 5 s; ticks never overlap (a request during a tick runs exactly one more). It takes `queued` items whose deps are all `done`, without children, ordered by `priority DESC, id ASC`, up to the free slots; transitions `queued → active` (CAS; a conflict skips the item), fetches, creates the worktree, creates the run and sets it `running`. A dispatch error puts the item back to `queued`. At most one `runChange` per run per process. A `ConflictError` abandons the current step and is never retried blindly.
 
+**Unexpected node errors.** Any other throw (not a `ConflictError`, not a stop) fails fast, in one store transaction: the node → `failed` with output `{"error": "<message>"}` (non-Error throws via `String(e)`), a retro whose `notes` is `node <name> errored: <message>`, the item `active → ready` (left alone if no longer `active`), and the run → `failed` last, which frees the `maxParallel` slot. Nothing is retried; the worktree and branch are kept. `factory start <id>` creates a new run (attempt n+1) with a fresh worktree from `origin/main`. If the engine is stopping, nothing is written and restart recovery handles the run.
+
 **Self-modification.** If a merged diff touches `factory/`, the merge output records `touches_factory: true`, and the retro writes the hint `daemon code changed on main — restart the daemon to pick it up` to `notes` and the log. The daemon does not restart itself; restart it by hand after pulling.
 
 ## 6. Execution facts
@@ -421,6 +423,11 @@ Verified locally on omp 19.1.0 and Node 24.16; keep them unless re-verified.
 - Context: How does the daemon run during the cutover?
 - Decision: In the foreground, as a service of the driving session; a systemd `--user` unit is optional.
 - Consequences: Closing the session stops the factory; restart recovery picks runs back up.
+
+### D-41 Unexpected node errors fail the run
+- Context: In-place retry of an errored node in a re-entrant state machine kept producing edge cases (#53, #56: 15 review findings in 2 rounds). Without handling, the run stayed `running`, held a dispatch slot, and re-entry hit `UNIQUE(run_id,node,iteration)`.
+- Decision: Unexpected node errors fail the run; recovery is a new attempt, never an in-place retry.
+- Consequences: A rare error costs a rebuild (`factory start <id>` makes attempt n+1 from `origin/main`). No retry gates or automatic retries for errors.
 
 ## 9. Open risks and v1 backlog
 

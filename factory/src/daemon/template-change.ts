@@ -366,8 +366,22 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       return;
     }
     console.error(`factory: run ${runId} ${step?.kind} failed:`, e);
-    if (cur) {
-      try { close(cur, 'failed', { output: (e as Error).message }); } catch (e2) { console.error(`factory: run ${runId}: could not mark node run ${cur.id} failed:`, e2); }
+    if (ctx.stopped()) return; // restart recovery handles it
+    // Fail fast: recovery is a new attempt (`factory start`), never an in-place retry.
+    const message = e instanceof Error ? e.message : String(e);
+    try {
+      store.atomic(() => {
+        const node = cur?.node ?? step?.kind ?? 'unknown';
+        if (cur) close(cur, 'failed', { output: JSON.stringify({ error: message }) });
+        const retro = computeRetro(run(), store.listNodeRuns(runId), []);
+        retro.notes = `node ${node} errored: ${message}`;
+        store.recordRetro(retro);
+        const i = item();
+        if (i.status === 'active') store.transitionItem(i.id, 'active', 'ready');
+        setRun('running', 'failed'); // last: the dispatch slot is counted by 'running'
+      });
+    } catch (e2) {
+      console.error(`factory: run ${runId}: could not fail run:`, e2);
     }
   }
 }

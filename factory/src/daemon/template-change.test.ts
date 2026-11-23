@@ -275,3 +275,42 @@ test('stopped after a session: nothing is written and the node run stays running
   assert.equal(b.status, 'running');
   assert.equal(worktrees.commitsAhead(f.wt.path, 'origin/main'), 0);
 });
+
+const toMerge = async (f: ReturnType<typeof setup>) => {
+  await runChange(f.ctx);
+  f.decide('approve');
+};
+
+for (const [name, thrown, message] of [['Error', new Error('forge down'), 'forge down'], ['null', null, 'null']] as const) {
+  test(`unexpected node error (${name}) fails the run, readies the item, records a retro`, async (t) => {
+    const f = setup(t);
+    await toMerge(f);
+    (f.ctx.forge as unknown as { prState: () => never }).prState = () => { throw thrown; };
+    await runChange(f.ctx);
+    assert.equal(f.row('merge', 1)?.status, 'failed');
+    assert.deepEqual(JSON.parse(f.row('merge', 1)!.output!), { error: message });
+    assert.equal(f.store.getRun(f.runId).status, 'failed');
+    assert.ok(f.store.getRun(f.runId).ended_at);
+    assert.equal(f.store.getItem(f.item.id).status, 'ready');
+    assert.equal(f.store.getRetro(f.runId)?.notes, `node merge errored: ${message}`);
+  });
+}
+
+test('unexpected node error leaves a no-longer-active item alone; stopped() does nothing', async (t) => {
+  const f = setup(t);
+  await toMerge(f);
+  (f.ctx.forge as unknown as { prState: () => never }).prState = () => {
+    f.store.transitionItem(f.item.id, 'active', 'cancelled');
+    throw new Error('x');
+  };
+  await runChange(f.ctx);
+  assert.equal(f.store.getItem(f.item.id).status, 'cancelled');
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+
+  const g = setup(t);
+  await toMerge(g);
+  (g.ctx.forge as unknown as { prState: () => Promise<never> }).prState = async () => { g.stop = true; throw new Error('x'); };
+  await runChange(g.ctx);
+  assert.equal(g.store.getRun(g.runId).status, 'running');
+  assert.equal(g.row('merge', 1)?.status, 'running');
+});
