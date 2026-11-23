@@ -23,7 +23,7 @@ const nr = (node: string, iteration: number, status: NodeRun['status'], output: 
   ({ id: ++seq, run_id: 1, node, iteration, status, output, model: null, cost_usd: 0 }) as NodeRun;
 const gate = (node: string, kind: string, decision: Gate['decision'] = null, note: string | null = null): Gate =>
   ({ id: ++seq, run_id: 1, node, kind, decision, note, closed_at: decision ? 'x' : null }) as Gate;
-const verdict = (v: string) => JSON.stringify({ pre_sha: 'a', verdict: v, findings: [] });
+const verdict = (v: string) => JSON.stringify({ pre_sha: 'a', verdict: v, findings: v === 'changes' ? [{ severity: 'blocking', text: 'fix' }] : [] });
 const step = (nodeRuns: NodeRun[], gates: Gate[] = [], o: Partial<StepInput> = {}) =>
   nextStep({ run: baseRun, nodeRuns, gates, retro: false, config, ...o });
 const kind = (s: ReturnType<typeof nextStep>) => ({ ...s, row: undefined });
@@ -64,6 +64,13 @@ test('nextStep: build → test → review → pr', () => {
   assert.deepEqual(step(ok(1)), { kind: 'review', iteration: 1 });
   assert.deepEqual(step([...ok(1), nr('review', 1, 'completed', verdict('approve'))]), { kind: 'pr', iteration: 1 });
   assert.deepEqual(step([...failedTests(1, 1)]), { kind: 'build', iteration: 2 });
+});
+
+test('nextStep: persisted legacy review is re-derived (approve + string findings reroutes to rework)', () => {
+  const legacy = JSON.stringify({ pre_sha: 'a', verdict: 'approve', findings: ['fix a'] });
+  assert.deepEqual(step([...ok(1), nr('review', 1, 'completed', legacy)]), { kind: 'build', iteration: 2 });
+  const advisoryOnly = JSON.stringify({ pre_sha: 'a', verdict: 'changes', findings: [{ severity: 'advisory', text: 'nit' }] });
+  assert.deepEqual(step([...ok(1), nr('review', 1, 'completed', advisoryOnly)]), { kind: 'pr', iteration: 1 });
 });
 
 test('nextStep: build budget, failure gates, review rounds', () => {
