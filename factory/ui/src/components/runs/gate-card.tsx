@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTime } from '@/lib/format';
+import { urlIndex } from '../../../../src/shared/pr-ref.ts';
 import type { GateWithPr } from '@/lib/api';
 
 const DECISION = {
@@ -10,17 +11,16 @@ const DECISION = {
   open: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
 };
 
-// Links the PR reference in the question (its URL, else "PR #N"); appends the link when the question names neither.
+// Links the run's PR in the question: its complete URL, else "PR #N". Appends the link when the question names neither.
 function Question({ gate }: { gate: GateWithPr }) {
   const { question, pr_number: n, pr_url: url } = gate;
-  if (!url || n === null) return <p className="whitespace-pre-wrap">{question}</p>;
-  const byUrl = question.indexOf(url);
-  const byNumber = question.search(new RegExp(`PR #${n}\\b`));
-  const at = byUrl >= 0 ? byUrl : byNumber;
-  const text = byUrl >= 0 ? url : `PR #${n}`;
-  const ref = <a href={url} target="_blank" rel="noreferrer" className="underline">{text}</a>;
-  if (at < 0) return <p className="whitespace-pre-wrap">{question} ({ref})</p>;
-  return <p className="whitespace-pre-wrap">{question.slice(0, at)}{ref}{question.slice(at + text.length)}</p>;
+  if (!url) return <p className="whitespace-pre-wrap">{question}</p>;
+  const link = (text: string) => <a href={url} target="_blank" rel="noreferrer" className="underline">{text}</a>;
+  const byUrl = urlIndex(question, url);
+  if (byUrl >= 0) return <p className="whitespace-pre-wrap">{question.slice(0, byUrl)}{link(url)}{question.slice(byUrl + url.length)}</p>;
+  const byNumber = n === null ? null : new RegExp(`PR #${n}\\b`).exec(question);
+  if (byNumber) return <p className="whitespace-pre-wrap">{question.slice(0, byNumber.index)}{link(`PR #${n}`)}{question.slice(byNumber.index + byNumber[0].length)}</p>;
+  return <p className="whitespace-pre-wrap">{question} ({link(n === null ? url : `PR #${n}`)})</p>;
 }
 
 export function GateCard({ gate, context }: { gate: GateWithPr; context?: ReactNode }) {

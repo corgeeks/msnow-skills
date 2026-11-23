@@ -7,7 +7,7 @@ import { useResource } from '@/lib/events';
 export const Route = createFileRoute('/gates')({ component: Page });
 
 function Page() {
-  const { data: gates, error } = useResource(api.gates(), { refetchOn: ['gate.opened', 'gate.closed'] });
+  const { data: gates, error } = useResource(api.gates(), { refetchOn: ['gate.opened', 'gate.closed', 'run.updated'] }); // run.updated: a run gaining its PR changes gate links
   const { data: runs } = useResource(api.runs(), { refetchOn: ['run.created'] });
   const { data: items } = useResource(api.items(), { refetchOn: ['item.created', 'item.updated'] });
   if (!gates) return error ? <p className="text-destructive">{error.message}</p> : <Skeleton className="h-40 w-full" />;
