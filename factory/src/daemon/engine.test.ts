@@ -174,7 +174,7 @@ test('stop() does not wait for runs and silences the engine', async (t) => {
   assert.equal(store.getItem(late.id).status, 'queued');
 });
 
-test('an unexpected node error frees the slot; factory start makes attempt 2', async (t) => {
+test('an unexpected node error frees the slot', async (t) => {
   const { store, engine, calls } = setup(t, 1, true);
   const [a, b] = ['a', 'b'].map((title) => store.createItem({ title, status: 'queued' }));
   await engine.start();
@@ -183,9 +183,4 @@ test('an unexpected node error frees the slot; factory start makes attempt 2', a
   assert.equal(store.getItem(a.id).status, 'ready');
   assert.equal(store.getItem(b.id).status, 'active');
   assert.equal(store.getRetro(1)?.notes, 'node build errored: boom');
-  calls[1].resolve();
-  store.transitionRun(calls[1].ctx.runId, 'running', 'completed');
-  store.transitionItem(a.id, 'ready', 'queued'); // factory start
-  await until(() => calls.length === 3);
-  assert.equal(store.getRun(calls[2].ctx.runId).attempt, 2);
 });

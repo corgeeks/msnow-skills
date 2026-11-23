@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { main } from '../cli/main.ts';
 import { killAllSessions } from './omp.ts';
 import { INTERRUPTED, RESTART_HINT } from './template-change.ts';
-import { APPROVE, defaultScript, setupFactory, waitFor, type Script } from '../../test/e2e-harness.ts';
+import { APPROVE, defaultScript, gitOut, setupFactory, waitFor, type Script } from '../../test/e2e-harness.ts';
 
 type F = Awaited<ReturnType<typeof setupFactory>>;
 const runOf = (f: F, itemId: number) => waitFor(() => f.store.listRuns({ item_id: itemId })[0]);
@@ -135,6 +136,33 @@ test('e2e', { concurrency: 1 }, async (t) => {
     assert.equal(f.git(['ls-remote', 'origin', `factory/${item.id}-1`]), '');
     f.git(['fetch', '-q', 'origin']);
     assert.doesNotMatch(f.git(['ls-tree', '-r', '--name-only', 'origin/main']), /feature-1\.txt/);
+  });
+
+  await t.test('unexpected node error fails the run; factory start makes attempt 2 from origin/main', async (t) => {
+    const f = await setupFactory(t);
+    const real = f.forge.prState;
+    let boom = true;
+    f.forge.prState = async (n) => { if (boom) throw new Error('forge down'); return real(n); };
+    const { item, gate, run } = await toMergeGate(f);
+    const wt1 = f.store.getRun(run.id).worktree!;
+    await f.decide(gate.id, 'approve');
+    await waitFor(() => f.store.getRun(run.id).status === 'failed' && f.store.getRetro(run.id));
+    assert.equal(f.store.getItem(item.id).status, 'ready');
+    assert.equal(f.store.getRetro(run.id)!.notes, 'node merge errored: forge down');
+    assert.deepEqual(out(f.nodes(run.id).find((n) => n.node === 'merge')!.output), { error: 'forge down' });
+    assert.ok(existsSync(wt1));
+    assert.notEqual(f.git(['branch', '--list', `factory/${item.id}-1`]), '');
+
+    boom = false;
+    assert.equal(await main(['start', String(item.id), '--port', String(f.port)]), 0);
+    const run2 = await waitFor(() => f.store.listRuns({ item_id: item.id }).find((r) => r.attempt === 2));
+    const wt2 = (await waitFor(() => f.store.getRun(run2.id).worktree))!;
+    await openGate(f);
+    assert.notEqual(wt2, wt1);
+    assert.equal(wt2, join(f.root, '.factory', 'worktrees', `${item.id}-2`));
+    assert.equal(f.store.getRun(run2.id).branch, `factory/${item.id}-2`);
+    f.git(['fetch', '-q', 'origin']);
+    assert.equal(gitOut(wt2, ['merge-base', 'HEAD', 'origin/main']), f.git(['rev-parse', 'origin/main']));
   });
 
   await t.test('restart mid-run', async (t) => {

@@ -9,6 +9,7 @@ import { runSession, type SessionOptions } from './omp.ts';
 import * as worktrees from './worktrees.ts';
 import { DEFAULT_CONFIG } from '../shared/config.ts';
 import { INTERRUPTED, nextStep, RESTART_HINT, REVERTED, runChange, type ChangeContext, type StepInput } from './template-change.ts';
+import { git } from './git.ts';
 import { makeRepos } from '../../test/fixtures/git-repos.ts';
 import type { Forge } from './forge.ts';
 import type { Activity, Gate, NodeRun, Run } from '../shared/types.ts';
@@ -313,4 +314,52 @@ test('unexpected node error leaves a no-longer-active item alone; stopped() does
   await runChange(g.ctx);
   assert.equal(g.store.getRun(g.runId).status, 'running');
   assert.equal(g.row('merge', 1)?.status, 'running');
+});
+
+type Patchable = { prState: () => unknown; deleteRemoteBranch: () => unknown };
+const forgeOf = (f: ReturnType<typeof setup>) => f.ctx.forge as unknown as Patchable;
+const failed = (f: ReturnType<typeof setup>, node: string, message: string) => {
+  assert.deepEqual(JSON.parse(f.row(node, 1)!.output!), { error: message });
+  assert.equal(f.row(node, 1)!.status, 'failed');
+  assert.equal(f.store.getRun(f.runId).status, 'failed');
+  assert.equal(f.store.getItem(f.item.id).status, 'ready');
+  assert.equal(f.store.getRetro(f.runId)?.notes, `node ${node} errored: ${message}`);
+};
+
+test('error after a rejected merge gate fails the paused run and its merge_gate node', async (t) => {
+  const f = setup(t);
+  await runChange(f.ctx);
+  f.decide('reject');
+  forgeOf(f).prState = () => { throw new Error('forge down'); };
+  await runChange(f.ctx);
+  failed(f, 'merge_gate', 'forge down');
+  assert.ok(existsSync(f.wt.path));
+});
+
+for (const [name, decision] of [['merge', 'approve'], ['merge reject', 'reject']] as const) {
+  test(`remote branch deletion error (${name}) keeps the worktree and local branch`, async (t) => {
+    const f = setup(t);
+    await runChange(f.ctx);
+    f.decide(decision);
+    forgeOf(f).deleteRemoteBranch = () => { throw new Error('push refused'); };
+    await runChange(f.ctx);
+    failed(f, decision === 'approve' ? 'merge' : 'merge_gate', 'push refused');
+    assert.ok(existsSync(f.wt.path));
+    assert.match(git(f.root, ['branch', '--list', f.wt.branch]), /factory\//);
+  });
+}
+
+test('an unprintable thrown value still fails the run', async (t) => {
+  const f = setup(t);
+  await toMerge(f);
+  forgeOf(f).prState = () => { throw Object.create(null); };
+  await runChange(f.ctx);
+  failed(f, 'merge', 'unprintable thrown value');
+});
+
+test('a resumed run with no reviewer mapping records a failed review node', async (t) => {
+  const f = setup(t, { script: ({ role }) => role === 'build' ? defaultScript({ role, n: 1 }) : [] });
+  f.ctx.config = { ...config, roles: { ...config.roles, reviewer: {} } };
+  await runChange(f.ctx);
+  failed(f, 'review', "no reviewer mapped for model family 'anthropic'");
 });

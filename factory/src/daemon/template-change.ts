@@ -119,6 +119,11 @@ const reviewMarkdown = (model: string | null, v: Out) =>
 
 const STOP = Symbol('stopped');
 
+/** Message for a thrown value; String() itself can throw (e.g. `Object.create(null)`). */
+function errorMessage(e: unknown): string {
+  try { return String(e instanceof Error ? e.message : e); } catch { return 'unprintable thrown value'; }
+}
+
 /** Drives one `change` run until it is terminal or waiting on an open gate. Re-entrant: state lives in the store. */
 export async function runChange(ctx: ChangeContext): Promise<void> {
   const { store, bus, config, paths, forge, worktrees: wt, runId } = ctx;
@@ -204,8 +209,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const build = lastRow(rows, 'build', s.iteration)!;
         const family = (build.model ?? '').split('/')[0];
         const model = config.roles.reviewer[family];
+        begin('review', s.iteration, s.row, model); // recorded before the lookup can throw
         if (!model) throw new Error(`no reviewer mapped for model family '${family}'`);
-        begin('review', s.iteration, s.row, model);
         // The engine overwrites an interrupted row's output, so a re-run falls back to the build's recorded head.
         const pre = s.row ? parse(s.row.output).pre_sha ?? parse(build.output).head_sha ?? wt.headSha(w) : wt.headSha(w);
         store.updateNodeRun(cur!.id, { output: JSON.stringify({ pre_sha: pre }) });
@@ -230,11 +235,11 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       }
       case 'pr': {
         const i = item();
+        begin('pr', s.iteration, s.row);
         const review = lastRow(rows, 'review', s.iteration)!;
         const cmd = i.test_cmd ?? config.defaultTestCmd;
         const tail = (lastRow(rows, 'test', s.iteration)?.output ?? '').split('\n').slice(1).slice(-20).join('\n');
         const md = reviewMarkdown(review.model, parse(review.output));
-        begin('pr', s.iteration, s.row);
         await forge.pushBranch(w, r.branch!);
         halt();
         let n = r.pr_number;
@@ -296,9 +301,10 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         halt();
         await forge.syncMain();
         halt();
-        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         await forge.deleteRemoteBranch(r.branch!);
         halt();
+        // Local artifacts go last: an unexpected error above keeps the worktree and branch.
+        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         end('completed', { output: JSON.stringify({ touches_factory: touches }) });
         return; // finalize is derived next
       }
@@ -312,16 +318,18 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
       case 'merge_reject': {
         const g = latest(gates.filter((x) => x.node === 'merge_gate'))!;
         const n = r.pr_number!;
+        const mg = lastRow(rows, 'merge_gate');
+        if (mg?.status === 'running') cur = mg; // an unexpected error below fails this node too
         if ((await forge.prState(n)).state === 'OPEN') {
           halt();
           await forge.closePr(n, g.note ?? undefined);
         }
         halt();
-        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         await forge.deleteRemoteBranch(r.branch!);
         halt();
-        const mg = lastRow(rows, 'merge_gate');
-        if (mg?.status === 'running') close(mg, 'failed');
+        // Local artifacts go last: an unexpected error above keeps the worktree and branch.
+        if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
+        if (mg?.status === 'running') end('failed');
         setRun('paused', 'cancelled');
         setItem('active', 'ready');
         return;
@@ -368,17 +376,19 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
     console.error(`factory: run ${runId} ${step?.kind} failed:`, e);
     if (ctx.stopped()) return; // restart recovery handles it
     // Fail fast: recovery is a new attempt (`factory start`), never an in-place retry.
-    const message = e instanceof Error ? e.message : String(e);
+    const message = errorMessage(e);
     try {
       store.atomic(() => {
         const node = cur?.node ?? step?.kind ?? 'unknown';
         if (cur) close(cur, 'failed', { output: JSON.stringify({ error: message }) });
+        const from = run().status;
+        if (from !== 'running' && from !== 'paused') return; // already terminal (e.g. a retro that threw)
         const retro = computeRetro(run(), store.listNodeRuns(runId), []);
         retro.notes = `node ${node} errored: ${message}`;
         store.recordRetro(retro);
         const i = item();
         if (i.status === 'active') store.transitionItem(i.id, 'active', 'ready');
-        setRun('running', 'failed'); // last: the dispatch slot is counted by 'running'
+        setRun(from, 'failed'); // last: the dispatch slot is counted by 'running'
       });
     } catch (e2) {
       console.error(`factory: run ${runId}: could not fail run:`, e2);
