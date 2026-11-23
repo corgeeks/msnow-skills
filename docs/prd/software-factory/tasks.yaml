@@ -40,7 +40,7 @@
     limits, failure gates, restart recovery, executor and reviewer prompts. Integrates
     sf1 and sf2.'
   spec: ../sf5-loop-engine/PRD.md
-  status: in-progress
+  status: completed
 - name: L3 · sf6 — Self-hosting cutover
   description: Import the remaining software-factory backlog (L4) into the factory,
     run one real loop on the factory itself end-to-end, document the factory in README,

@@ -23,5 +23,5 @@
 - name: End-to-end loop tests
   description: 'e2e.test.ts: happy path to merged + state commit, test-fail retry,
     review rework, exhausted failure gate, merge reject, restart mid-run.'
-  status: defined
+  status: completed
   spec: specs/e2e-loop-tests.md

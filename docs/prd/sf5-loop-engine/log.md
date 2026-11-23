@@ -1,5 +1,19 @@
 # Implementation Log
 
+## 2026-11-22T16:09:38 - End-to-end loop tests
+
+**Status**: Completed
+
+**Summary**: Added six offline e2e scenarios (happy path, test retry, review rework, exhausted failure gate reject/approve, merge-gate reject, restart mid-run) over the real store/bus/HTTP/forge/committer/worktrees/engine with fake-omp and fake-gh.
+
+**Changes Made**:
+- `factory/test/e2e-harness.ts` - Created: `setupFactory`, `waitFor`, git helpers, recording `runSession` wrapper
+- `factory/src/daemon/e2e.test.ts` - Created: six scenarios (scenario 4 split into reject/approve subtests)
+
+**Notes**: No loop bugs surfaced. `createForge` has no env option, so fake-gh env is passed via an `env` prefix in `ghCommand` (process.env never mutated). The restart test asserts the interrupted transition via bus events, since the new engine re-runs the row synchronously in `start()`. File runs in ~4-14 s; 3 consecutive runs green.
+
+---
+
 ## 2026-11-22T16:05:54 - Engine scheduler, recovery, and wiring
 
 **Status**: Completed
