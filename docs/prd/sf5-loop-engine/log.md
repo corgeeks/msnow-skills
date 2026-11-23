@@ -1,5 +1,20 @@
 # Implementation Log
 
+## 2026-11-22T16:05:54 - Engine scheduler, recovery, and wiring
+
+**Status**: Completed
+
+**Summary**: Added `engine.ts` (`createEngine` dispatch within `maxParallel`, non-overlapping ticks, container roll-up, gate resume, restart recovery, `stop()`) and `validateReviewerMapping`, wired into `main.ts`.
+
+**Changes Made**:
+- `factory/src/daemon/engine.ts` - Created: engine and reviewer-mapping validation
+- `factory/src/daemon/engine.test.ts` - Created: dispatch, concurrency, attempts, deps/containers, roll-up, gate resume, recovery, validation, stop tests
+- `factory/src/daemon/main.ts` - Modified: validate mapping after the instance lock, create the engine after the committer, register `engine.stop` last, then `await engine.start()`
+
+**Notes**: `createRun` takes only `{item_id, template, attempt}`, so dispatch follows it with `updateRun({branch, worktree, started_at})` and `transitionRun('pending','running')`. `ticking` is set before dispatch runs, because store writes emit events synchronously and would otherwise start a nested tick. The engine also exposes `tick` for tests.
+
+---
+
 ## 2026-11-22T16:03:15 - change loop state machine
 
 **Status**: Completed

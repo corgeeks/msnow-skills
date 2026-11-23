@@ -18,7 +18,7 @@
 - name: Engine scheduler, recovery, and wiring
   description: engine.ts dispatch within maxParallel, container roll-up, gate-closed
     resume, restart recovery; main.ts wiring; tests.
-  status: defined
+  status: completed
   spec: specs/engine-scheduler.md
 - name: End-to-end loop tests
   description: 'e2e.test.ts: happy path to merged + state commit, test-fail retry,

@@ -5,13 +5,15 @@ import { loadConfig } from '../shared/config.ts';
 import { createBus } from './bus.ts';
 import { openDb } from './db.ts';
 import { createForge } from './forge.ts';
+import { createEngine, validateReviewerMapping } from './engine.ts';
 import { createQueue } from './git.ts';
 import { createApiServer } from './http.ts';
 import { acquireInstanceLock, installSignalHandlers, onShutdown } from './lifecycle.ts';
-import { killAllSessions } from './omp.ts';
+import { killAllSessions, runSession } from './omp.ts';
 import { resolvePaths } from './paths.ts';
 import { createStateCommitter } from './state-commit.ts';
 import { createStore } from './store.ts';
+import * as worktrees from './worktrees.ts';
 
 const { values } = parseArgs({ options: { root: { type: 'string' }, port: { type: 'string' } } });
 const paths = resolvePaths(values.root);
@@ -35,6 +37,15 @@ try {
   process.exit(1);
 }
 
+try {
+  validateReviewerMapping(config);
+} catch (e) {
+  console.error((e as Error).message);
+  server.close();
+  db.close();
+  process.exit(1);
+}
+
 const queue = createQueue();
 const forge = createForge({ root: paths.root, mainWorktree: paths.mainWorktree, queue });
 try {
@@ -52,4 +63,7 @@ const committer = createStateCommitter({
 onShutdown(async () => { committer.stop(); await committer.flush('shutdown'); });
 onShutdown(() => killAllSessions());
 installSignalHandlers({ server, db });
+const engine = createEngine({ store, bus, config, paths, runSession, worktrees, forge, committer });
+onShutdown(() => engine.stop());
 console.log(`factory daemon listening on http://127.0.0.1:${(server.address() as AddressInfo).port} (root ${paths.root})`);
+await engine.start();
