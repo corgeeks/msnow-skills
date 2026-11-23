@@ -16,6 +16,7 @@ commands:
   show <id> [--json]                      item detail with runs and gates
   add --title T [--type task] [--parent id] [--body B] [--spec path]
       [--tier heavy|standard|light] [--test-cmd c] [--depends-on 1,2] [--ready]
+  undep <id> <depends-on-id>              remove a dependency
   import <prd-dir> [--dry-run]            import a PRD directory
   start <id...> | --all                   queue ready leaves (ready -> queued)
   approve <gate-id> [--note N]
@@ -39,6 +40,7 @@ const COMMANDS: Record<string, Opts> = {
     spec: { type: 'string' }, tier: { type: 'string' }, 'test-cmd': { type: 'string' },
     'depends-on': { type: 'string' }, ready: { type: 'boolean' },
   },
+  undep: {},
   import: { 'dry-run': { type: 'boolean' } },
   start: { all: { type: 'boolean' } },
   approve: { note: { type: 'string' } },
@@ -109,6 +111,14 @@ export async function main(argv: string[]): Promise<number> {
         out(String(item.id));
         return 0;
       }
+      case 'undep': {
+        if (pos.length !== 2) throw new UsageError('undep takes <id> <depends-on-id>');
+        const id = int(pos[0], 'id');
+        const dep = int(pos[1], 'depends-on-id');
+        await api.del(`/api/items/${id}/deps/${dep}`);
+        out(`removed dep ${id} -> ${dep}`);
+        return 0;
+      }
       case 'import': {
         const dir = one('prd-dir');
         let items: BatchItem[];
@@ -122,7 +132,7 @@ export async function main(argv: string[]): Promise<number> {
       case 'approve': case 'reject': {
         const id = int(one('gate-id'), 'gate-id');
         await api.post(`/api/gates/${id}/decision`, { decision: cmd, note: v.note });
-        out(`gate ${id} ${cmd}d`);
+        out(`gate ${id} ${cmd === 'approve' ? 'approved' : 'rejected'}`);
         return 0;
       }
     }

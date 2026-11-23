@@ -140,6 +140,12 @@ export function createApiServer(opts: { store: Store; bus: Bus; uiDir: string })
         return { ok: true };
       },
     },
+    {
+      method: 'DELETE', pattern: /^\/api\/items\/(\d+)\/deps\/(\d+)$/, handler: ({ m }) => {
+        store.removeDep(Number(m[1]), Number(m[2]));
+        return { ok: true };
+      },
+    },
     { method: 'GET', pattern: /^\/api\/runs$/, handler: ({ q }) => store.listRuns({ item_id: intParam(q, 'item') }) },
     {
       method: 'GET', pattern: /^\/api\/runs\/(\d+)$/, handler: ({ m }) => {

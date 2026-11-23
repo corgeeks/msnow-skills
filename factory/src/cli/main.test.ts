@@ -106,9 +106,21 @@ test('approve/reject gates; second decision conflicts', async () => {
   assert.equal(await run('approve', String(g1.id), '--note', 'fine'), 0);
   assert.equal(stdout.trim(), `gate ${g1.id} approved`);
   assert.equal(await run('reject', String(g2.id)), 0);
+  assert.equal(stdout.trim(), `gate ${g2.id} rejected`);
   assert.ok(store.listGates({ run_id: r.id }).every((g) => g.closed_at));
   assert.equal(await run('approve', String(g1.id)), 1);
   assert.match(stderr, /^conflict:/);
+});
+
+test('undep removes a dependency; missing edge exits 1', async () => {
+  const a = await add('--title', 'UA');
+  const b = await add('--title', 'UB', '--depends-on', String(a));
+  assert.deepEqual(store.getDeps(b).map((d) => d.id), [a]);
+  assert.equal(await run('undep', String(b), String(a)), 0, stderr);
+  assert.equal(stdout.trim(), `removed dep ${b} -> ${a}`);
+  assert.deepEqual(store.getDeps(b), []);
+  assert.equal(await run('undep', String(b), String(a)), 1);
+  assert.match(stderr, /^not_found: dependency/);
 });
 
 test('status --json and show --json keys; show 999', async () => {

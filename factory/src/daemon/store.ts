@@ -197,6 +197,13 @@ export function createStore(db: DatabaseSync, bus: Bus) {
         emit('item.updated', { item_id: itemId }, { depends_on: dependsOnId });
       });
     },
+    removeDep(itemId: number, dependsOnId: number): void {
+      mutate(() => {
+        const res = db.prepare(`DELETE FROM item_deps WHERE item_id = ? AND depends_on_id = ?`).run(itemId, dependsOnId);
+        if (res.changes !== 1) throw new NotFoundError(`dependency ${itemId} -> ${dependsOnId} not found`);
+        emit('item.updated', { item_id: itemId }, { depends_on: dependsOnId, removed: true });
+      });
+    },
     getDeps: (id: number) => all<WorkItem>(`SELECT w.* FROM item_deps d JOIN work_items w ON w.id = d.depends_on_id WHERE d.item_id = ? ORDER BY w.id`, id),
     getDependents: (id: number) => all<WorkItem>(`SELECT w.* FROM item_deps d JOIN work_items w ON w.id = d.item_id WHERE d.depends_on_id = ? ORDER BY w.id`, id),
     getChildren: (id: number) => all<WorkItem>(`SELECT * FROM work_items WHERE parent_id = ? ORDER BY id`, id),

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from './db.ts';
 import { createBus } from './bus.ts';
-import { ConflictError, CycleError, createStore } from './store.ts';
+import { ConflictError, CycleError, NotFoundError, createStore } from './store.ts';
 import type { FactoryEvent } from '../shared/types.ts';
 
 function setup() {
@@ -35,6 +35,19 @@ test('addDep rejects cycles and self-deps', () => {
   assert.throws(() => store.addDep(a, a), CycleError);
   assert.deepEqual(store.getDeps(a).map((i) => i.id), [b]);
   assert.deepEqual(store.getDependents(c).map((i) => i.id), [b]);
+});
+
+test('removeDep deletes the edge, emits item.updated, and misses → NotFoundError', () => {
+  const { store, seen } = setup();
+  const [a, b] = ['a', 'b'].map((title) => store.createItem({ title }).id);
+  store.addDep(a, b);
+  store.removeDep(a, b);
+  assert.deepEqual(store.getDeps(a), []);
+  assert.equal(seen.at(-1)!.type, 'item.updated');
+  assert.deepEqual(seen.at(-1)!.data, { depends_on: b, removed: true });
+  store.addDep(b, a); // the removed edge no longer blocks the reverse one
+  assert.deepEqual(store.getDeps(b).map((i) => i.id), [a]);
+  assert.throws(() => store.removeDep(a, b), NotFoundError);
 });
 
 test('dispatchableItems: queued, deps done, priority order', () => {
