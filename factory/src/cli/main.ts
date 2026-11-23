@@ -211,4 +211,11 @@ function daemon(port: number | undefined): Promise<number> {
   }));
 }
 
-if (import.meta.main) process.exitCode = await main(process.argv.slice(2));
+if (import.meta.main) {
+  // stdout closed early (e.g. `factory import … --dry-run | head`): exit quietly like other Unix tools
+  process.stdout.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code !== 'EPIPE') throw e;
+    process.exit(0);
+  });
+  process.exitCode = await main(process.argv.slice(2));
+}

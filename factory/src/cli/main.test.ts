@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { test, before, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -138,4 +139,16 @@ test('usage errors exit 64; --help exits 0', async () => {
   assert.equal(await cli([]), 64);
   assert.equal(await cli(['--help']), 0);
   assert.match(stdout, /node factory\/src\/cli\/main\.ts/);
+});
+
+test('stdout closed early exits 0 without an unhandled error', async () => {
+  const child = spawn(process.execPath, [path.join(import.meta.dirname, 'main.ts'), 'import', umbrella, '--dry-run'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (d: Buffer) => (stderr += d));
+  child.stdout.destroy();
+  const { promise, resolve } = Promise.withResolvers<number | null>();
+  child.once('close', (code) => resolve(code));
+  const code = await promise;
+  assert.equal(code, 0, stderr);
+  assert.equal(stderr, '');
 });
