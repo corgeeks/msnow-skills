@@ -70,8 +70,8 @@ export function nextStep({ run, nodeRuns, gates, retro, config }: StepInput): St
   if (lastRow(nodeRuns, 'pr')?.status === 'completed') return { kind: 'open_merge_gate', iteration: it };
   const review = lastRow(nodeRuns, 'review', it);
   const verdict = review?.status === 'completed' ? verdictOf(review.output) : undefined;
-  if (verdict === 'approve') return { kind: 'pr', iteration: it };
   if (gate?.kind === 'failure' && gate.decision === 'reject') return { kind: 'failure_reject' };
+  if (verdict === 'approve') return { kind: 'pr', iteration: it };
 
   if (it === 0) return { kind: 'build', iteration: 1 };
   const build = lastRow(nodeRuns, 'build', it)!;
@@ -264,6 +264,7 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         return;
       }
       case 'pr': {
+        resume(); // a failure gate persisted by an older parser can be approved straight into PR
         const i = item();
         begin('pr', s.iteration, s.row);
         const review = lastRow(rows, 'review', s.iteration)!;
