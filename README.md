@@ -11,6 +11,8 @@ Two skills ship from this repo:
 | **prd** | Create, plan (research + task breakdown), and implement PRDs. Supports **umbrella PRDs** (decompose a large effort into a slate of child PRDs whose progress rolls up to the parent) and is **resilient to interruptions** (an `in-progress` status + log checkpoints let a new session resume a task a previous one left unfinished). |
 | **breakdown** | Analyze an existing PRD and recommend — then, on confirmation, apply — splitting oversized tasks into subtasks or decomposing the PRD into an umbrella of child PRDs. |
 
+The repo also ships a local software factory that drives work items through build, test, review, PR, and merge; see [Software factory](#software-factory).
+
 ## Install
 
 ```bash
@@ -137,22 +139,87 @@ it rolls that progress up into any umbrella that owns the child. Status changes
 made through `scripts/update-task-status.sh` (what the workers use) already
 roll up on their own, so this hook only covers manual edits.
 
+## Software factory
+
+A local daemon that runs **build → test → review → PR → merge gate → merge → retro** over omp sessions, each task in its own git worktree. Design and decision log: [docs/factory/architecture.md](docs/factory/architecture.md).
+
+**Layout**
+
+- `factory/` — daemon, CLI, shared types, and tests.
+- `factory/ui` — read-only React UI, its own devDependency-only package.
+
+**Requirements:** Node ≥ 24.15, omp, `gh` (authenticated), `git`. `yq` and `jq` are also needed for `factory import`.
+
+**Run it** from the repo root:
+
+```bash
+node factory/src/daemon/main.ts          # or: npm run daemon --prefix factory
+npm link --prefix factory                 # puts `factory` on PATH
+```
+
+Without the link, use `node factory/src/cli/main.ts <command>` in place of `factory <command>`.
+
+**Commands** (`--port n` goes after the command, e.g. `factory status --port 7318`):
+
+- `daemon [--port n]` — run the daemon in the foreground.
+- `status [--json]` — counts, active items, open gates, waiting items.
+- `show <id> [--json]` — item detail with runs and gates.
+- `add --title T [...]` — create an item (`--type`, `--parent`, `--body`, `--spec`, `--tier`, `--test-cmd`, `--depends-on`, `--ready`).
+- `import <prd-dir> [--dry-run]` — import a PRD directory as a work-item tree.
+- `start <id...> | --all` — queue ready leaves (`ready` → `queued`).
+- `approve <gate-id> [--note N]` — approve an open gate.
+- `reject <gate-id> [--note N]` — reject an open gate.
+
+**UI:** build it once with `npm run build:ui --prefix factory`, then open http://127.0.0.1:7317 while the daemon runs.
+
+**Configuration:** `.factory/config.json` (defaults in `factory/src/shared/config.ts`; unknown keys are rejected):
+
+- `port` — HTTP/UI port (default 7317).
+- `roles` — `planner`; `executor` map by tier (`heavy`, `standard`, `light`); `reviewer` map from executor family to a cross-family reviewer model.
+- `caps` — `sessionMinutes`, `sessionCostUsd` per omp session.
+- `loop` — `maxParallel`, `maxBuildAttempts`, `maxReviewRounds`.
+- `git` — `stateCommitPrefix` and `stateCommitDebounceSec`.
+
+**Where state lives:** `.factory/factory.db` is committed to `main` and is the source of truth. The daemon is its single writer: it snapshots the live DB and pushes debounced `factory: state` commits from its detached worktree `.factory/main`. Factory-made commits are unsigned (`commit.gpgsign=false`), because an interactive signer can't run unattended. `.factory/main/`, `live/`, `worktrees/`, and `sessions/` are gitignored.
+
+**Optional: systemd `--user` unit** (`~/.config/systemd/user/factory.service`):
+
+```ini
+[Unit]
+Description=Software factory daemon
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/msnow-skills
+ExecStart=/usr/bin/env node factory/src/daemon/main.ts
+KillMode=control-group
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=default.target
+```
+
 ## Layout
 
 ```
 msnow-skills/
-└── skills/
-    ├── prd/
-    │   ├── SKILL.md
-    │   ├── workflows/      # CreatePRD, PlanPRD, WorkPRD
-    │   ├── agents/         # prd-worker, prd-researcher (prompt files)
-    │   ├── reference/      # prd-spec, task-spec, log-spec, cli-tools
-    │   ├── schemas/        # tasks.schema.json, research.schema.json
-    │   ├── scripts/        # CLI tools (+ lib/, validate-prd.sh)
-    │   └── hooks/          # optional PostToolUse validators + umbrella auto-sync
-    └── breakdown/
-        ├── SKILL.md
-        └── reference/      # heuristics
+├── skills/
+│   ├── prd/
+│   │   ├── SKILL.md
+│   │   ├── workflows/      # CreatePRD, PlanPRD, WorkPRD
+│   │   ├── agents/         # prd-worker, prd-researcher (prompt files)
+│   │   ├── reference/      # prd-spec, task-spec, log-spec, cli-tools
+│   │   ├── schemas/        # tasks.schema.json, research.schema.json
+│   │   ├── scripts/        # CLI tools (+ lib/, validate-prd.sh)
+│   │   └── hooks/          # optional PostToolUse validators + umbrella auto-sync
+│   └── breakdown/
+│       ├── SKILL.md
+│       └── reference/      # heuristics
+├── factory/                # software factory: daemon, CLI, shared types, tests
+│   └── ui/                 # read-only React UI (devDependency-only package)
+├── .factory/               # config.json, factory.db (committed); main/, live/, worktrees/ (gitignored)
+└── docs/factory/
+    └── architecture.md     # software factory design and decision log
 ```
 
 ## Credits
