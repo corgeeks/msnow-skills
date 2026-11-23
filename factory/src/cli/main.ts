@@ -5,7 +5,6 @@ import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { loadConfig } from '../shared/config.ts';
 import { resolvePaths } from '../daemon/paths.ts';
 import { TIERS, type BatchItem, type BatchResult, type GateWithPr, type ItemDetail, type ItemSummary, type RunDetail } from '../shared/types.ts';
-import { urlIndex } from '../shared/pr-ref.ts';
 import { ApiError, createClient, DaemonUnreachableError, type Client } from './client.ts';
 import { buildImportBatch } from './import.ts';
 
@@ -90,7 +89,10 @@ export async function main(argv: string[]): Promise<number> {
         for (const { run, node_runs, gates } of runs) {
           out(`run #${run.id} ${run.status} attempt ${run.attempt}${run.pr_url ? ` ${run.pr_url}` : ''}`);
           for (const n of node_runs) out(`  ${n.node}#${n.iteration} ${n.status}${n.model ? ` ${n.model}` : ''}`);
-          for (const g of gates) out(`  gate #${g.id} ${g.kind}${g.decision ? ` ${g.decision}` : ''}: ${g.question}${prTail(g)}`);
+          for (const g of gates) {
+            out(`  gate #${g.id} ${g.kind}${g.decision ? ` ${g.decision}` : ''}: ${g.question}`);
+            if (g.pr_url) out(`    pr: ${g.pr_url}`);
+          }
         }
         return 0;
       }
@@ -133,9 +135,6 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
-/** The gate's run PR URL, unless the question already names it in full. */
-const prTail = (g: GateWithPr) => (g.pr_url && urlIndex(g.question, g.pr_url) < 0 ? ` ${g.pr_url}` : '');
-
 async function status(api: Client, json: boolean, pos: string[]): Promise<number> {
   if (pos.length) throw new UsageError('status takes no positional arguments');
   const items: ItemSummary[] = await api.get('/api/items');
@@ -161,7 +160,8 @@ async function status(api: Client, json: boolean, pos: string[]): Promise<number
   if (gates.length) out('open gates:');
   for (const g of gates) {
     if (!runItem.has(g.run_id)) runItem.set(g.run_id, ((await api.get(`/api/runs/${g.run_id}`)) as RunDetail).run.item_id);
-    out(`  gate #${g.id} item #${runItem.get(g.run_id)} ${g.kind}: ${g.question}${prTail(g)}`);
+    out(`  gate #${g.id} item #${runItem.get(g.run_id)} ${g.kind}: ${g.question}`);
+    if (g.pr_url) out(`    pr: ${g.pr_url}`);
   }
   if (waiting.length) out('waiting on deps:');
   for (const w of waiting) out(`  #${w.id} ${w.title} (${w.open_deps} open)`);

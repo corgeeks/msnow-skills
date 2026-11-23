@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTime } from '@/lib/format';
-import { urlIndex } from '../../../../src/shared/pr-ref.ts';
 import type { GateWithPr } from '@/lib/api';
 
 const DECISION = {
@@ -10,18 +9,6 @@ const DECISION = {
   reject: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
   open: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
 };
-
-// Links the run's PR in the question: its complete URL, else "PR #N". Appends the link when the question names neither.
-function Question({ gate }: { gate: GateWithPr }) {
-  const { question, pr_number: n, pr_url: url } = gate;
-  if (!url) return <p className="whitespace-pre-wrap">{question}</p>;
-  const link = (text: string) => <a href={url} target="_blank" rel="noreferrer" className="underline">{text}</a>;
-  const byUrl = urlIndex(question, url);
-  if (byUrl >= 0) return <p className="whitespace-pre-wrap">{question.slice(0, byUrl)}{link(url)}{question.slice(byUrl + url.length)}</p>;
-  const byNumber = n === null ? null : new RegExp(`PR #${n}\\b`).exec(question);
-  if (byNumber) return <p className="whitespace-pre-wrap">{question.slice(0, byNumber.index)}{link(`PR #${n}`)}{question.slice(byNumber.index + byNumber[0].length)}</p>;
-  return <p className="whitespace-pre-wrap">{question} ({link(n === null ? url : `PR #${n}`)})</p>;
-}
 
 export function GateCard({ gate, context }: { gate: GateWithPr; context?: ReactNode }) {
   const label = gate.closed_at === null ? 'open' : gate.decision ?? 'open';
@@ -36,7 +23,12 @@ export function GateCard({ gate, context }: { gate: GateWithPr; context?: ReactN
         {context && <div className="text-muted-foreground text-sm">{context}</div>}
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <Question gate={gate} />
+        <p className="whitespace-pre-wrap break-words">{gate.question}</p>
+        {gate.pr_url && (
+          <p className="break-all"><span className="font-medium">Pull request:</span>{' '}
+            <a href={gate.pr_url} target="_blank" rel="noreferrer" className="underline">{gate.pr_number === null ? gate.pr_url : `PR #${gate.pr_number}`}</a>
+          </p>
+        )}
         {gate.recommendation && <p className="whitespace-pre-wrap"><span className="font-medium">Recommendation:</span> {gate.recommendation}</p>}
         <p className="text-muted-foreground">
           Opened {formatTime(gate.opened_at)}
