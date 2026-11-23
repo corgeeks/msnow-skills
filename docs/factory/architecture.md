@@ -50,7 +50,7 @@ flowchart LR
 
 **SSE**: each persisted event's `id:` is its `seq`; `Last-Event-ID` (or `?after=<seq>`) replays missed events. Executor tool calls stream as `event: activity` frames with no `id`; they are never persisted.
 
-**HTTP API** (`http.ts`): `GET /api/health`, `GET|POST /api/items`, `POST /api/items/batch` (idempotent on `source_ref`), `GET|PATCH /api/items/:id`, `POST /api/items/:id/deps` (cycle-checked), `GET /api/runs`, `GET /api/runs/:id`, `GET /api/gates`, `POST /api/gates/:id/decision`, `GET /api/events`. Bodies over 1 MiB get `413 too_large` and the connection is closed. PATCH applies field updates, then the CAS status transition; the two are not atomic.
+**HTTP API** (`http.ts`): `GET /api/health`, `GET|POST /api/items`, `POST /api/items/batch` (idempotent on `source_ref`), `GET|PATCH /api/items/:id`, `POST /api/items/:id/deps` (cycle-checked), `DELETE /api/items/:id/deps/:depends_on_id` (404 if the edge is absent), `GET /api/runs`, `GET /api/runs/:id`, `GET /api/gates`, `POST /api/gates/:id/decision`, `GET /api/events`. Bodies over 1 MiB get `413 too_large` and the connection is closed. PATCH applies field updates, then the CAS status transition; the two are not atomic.
 
 ## 3. Git topology
 

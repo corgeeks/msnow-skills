@@ -89,6 +89,18 @@ test('batch is idempotent; cycle → 409 cycle; unknown dep → 404', async (t) 
   assert.equal((await call('POST', `/api/items/${r1.json.ids.p}/deps`, { depends_on: 999 })).status, 404);
 });
 
+test('DELETE dep removes the edge; missing edge → 404', async (t) => {
+  const { call } = await setup(t);
+  const a = await call('POST', '/api/items', { title: 'a' });
+  const b = await call('POST', '/api/items', { title: 'b', depends_on: [a.json.id] });
+  const url = `/api/items/${b.json.id}/deps/${a.json.id}`;
+  const d = await call('DELETE', url);
+  assert.deepEqual([d.status, d.json], [200, { ok: true }]);
+  assert.deepEqual((await call('GET', `/api/items/${b.json.id}`)).json.deps, []);
+  const again = await call('DELETE', url);
+  assert.deepEqual([again.status, again.json.error.code], [404, 'not_found']);
+});
+
 test('runs and gates; deciding twice → 409', async (t) => {
   const { call, store } = await setup(t);
   const item = store.createItem({ title: 'g' });

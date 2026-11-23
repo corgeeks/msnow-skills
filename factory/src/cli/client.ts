@@ -16,6 +16,7 @@ export interface Client {
   get(path: string): Promise<any>;
   post(path: string, body: unknown): Promise<any>;
   patch(path: string, body: unknown): Promise<any>;
+  del(path: string): Promise<any>;
 }
 
 export function createClient(port: number): Client {
@@ -40,5 +41,6 @@ export function createClient(port: number): Client {
     get: (path: string) => req('GET', path),
     post: (path: string, body: unknown) => req('POST', path, body),
     patch: (path: string, body: unknown) => req('PATCH', path, body),
+    del: (path: string) => req('DELETE', path),
   };
 }

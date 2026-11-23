@@ -168,6 +168,7 @@ Without the link, use `node factory/src/cli/main.ts <command>` in place of `fact
 - `import <prd-dir> [--dry-run]` — import a PRD directory as a work-item tree.
 - `start <id...> | --all` — queue ready leaves (`ready` → `queued`).
 - `approve <gate-id> [--note N]` — approve an open gate.
+- `undep <id> <depends-on-id>` — remove a dependency edge.
 - `reject <gate-id> [--note N]` — reject an open gate.
 
 **UI:** build it once with `npm run build:ui --prefix factory`, then open http://127.0.0.1:7317 while the daemon runs.
