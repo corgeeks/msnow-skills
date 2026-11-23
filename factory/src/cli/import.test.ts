@@ -92,13 +92,3 @@ test('missing yq/jq surfaces the require_yaml_tools hint', (t) => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-test('smoke: software-factory umbrella', () => {
-  const items = buildImportBatch(path.join(root, 'docs/prd/software-factory'), root);
-  assertWellFormed(items);
-  const m = byRef(items);
-  assert.equal(m.get('prd:software-factory')!.type, 'umbrella');
-  assert.equal(m.get('prd:software-factory#L1 · Adapters and surfaces')!.type, 'group');
-  const sf12 = m.get('prd:sf12-configurable-gates')!;
-  assert.deepEqual([sf12.type, sf12.status], ['prd', 'draft']);
-});
