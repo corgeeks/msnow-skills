@@ -137,3 +137,14 @@ test('listRunGates is uncapped while listGates caps at 100', () => {
   assert.equal(all.length, 101);
   assert.equal(all[0].note, 'n0');
 });
+
+test('events publish in sequence order even when a subscriber writes re-entrantly', () => {
+  const { store, bus, seen } = setup();
+  let wrote = false;
+  bus.subscribe((e) => {
+    if (e.type === 'item.created' && !wrote) { wrote = true; store.createItem({ title: 'from subscriber' }); }
+  });
+  store.atomic(() => { store.createItem({ title: 'a' }); store.createItem({ title: 'b' }); });
+  assert.deepEqual(seen.map((e) => e.id), seen.map((e) => e.id).toSorted((x, y) => x - y));
+  assert.equal(seen.length, 3);
+});

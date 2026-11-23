@@ -387,3 +387,26 @@ test('a resumed run with no reviewer mapping records a failed review node', asyn
   await runChange(f.ctx);
   failed(f, 'review', "no reviewer mapped for model family 'anthropic'");
 });
+
+test('stop during the state flush starts no destructive cleanup', async (t) => {
+  const f = setup(t);
+  await runChange(f.ctx);
+  f.decide('approve');
+  f.ctx.committer.flush = async () => { f.stop = true; };
+  await runChange(f.ctx);
+  assert.equal(f.store.getRun(f.runId).status, 'completed');
+  assert.equal(f.calls.filter((c) => c[0] === 'deleteRemoteBranch').length, 0);
+  assert.ok(existsSync(f.wt.path));
+});
+
+test('merge reject records its retro with the cancellation; a stop during remote deletion keeps the worktree', async (t) => {
+  const f = setup(t);
+  await runChange(f.ctx);
+  f.decide('reject', 'no');
+  f.ctx.forge.deleteRemoteBranch = async () => { f.stop = true; };
+  await runChange(f.ctx);
+  assert.equal(f.store.getRun(f.runId).status, 'cancelled');
+  assert.equal(f.store.getItem(f.item.id).status, 'ready');
+  assert.ok(f.store.getRetro(f.runId));
+  assert.ok(existsSync(f.wt.path));
+});

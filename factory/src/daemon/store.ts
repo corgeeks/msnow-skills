@@ -40,6 +40,15 @@ export function createStore(db: DatabaseSync, bus: Bus) {
   const one = <T>(sql: string, ...p: SQLInputValue[]) => db.prepare(sql).get(...p) as T | undefined;
   const all = <T>(sql: string, ...p: SQLInputValue[]) => db.prepare(sql).all(...p) as T[];
 
+  // Committed events publish strictly in queue (= sequence) order: a subscriber that writes while
+  // events drain only appends to the queue, so its events can never overtake unpublished ones.
+  let draining = false;
+  function drain(): void {
+    if (draining) return;
+    draining = true;
+    try { while (pending.length) bus.publish(pending.shift()!); } finally { draining = false; }
+  }
+
   /** Runs a mutation in a tx; publishes its queued events after the outermost commit. */
   function mutate<T>(fn: () => T): T {
     const outer = !db.isTransaction;
@@ -51,7 +60,7 @@ export function createStore(db: DatabaseSync, bus: Bus) {
       pending.length = mark;
       throw e;
     }
-    if (outer) for (const e of pending.splice(0)) bus.publish(e);
+    if (outer) drain();
     return r;
   }
 

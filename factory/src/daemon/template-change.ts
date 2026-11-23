@@ -335,8 +335,10 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           writeRetro();
         });
         await ctx.committer.flush(`merged #${i.id}`);
-        // Destructive cleanup last: the run is already terminal, so an error here is only logged.
+        // Destructive cleanup last, each step only if not stopped: the run is already terminal.
+        halt();
         await forge.deleteRemoteBranch(r.branch!);
+        halt();
         if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         return;
       }
@@ -354,9 +356,12 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
           if (mg?.status === 'running') end('failed');
           setRun('paused', 'cancelled');
           setItem('active', 'ready');
+          writeRetro(); // terminalization includes the retro: a stop during cleanup must not lose it
         });
-        // Destructive cleanup after the outcome is committed; an error here is only logged.
+        // Destructive cleanup after the outcome is committed, each step only if not stopped.
+        halt();
         await forge.deleteRemoteBranch(r.branch!);
+        halt();
         if (existsSync(w)) wt.removeWorktree(paths.root, w, { deleteBranch: r.branch });
         return;
       }
