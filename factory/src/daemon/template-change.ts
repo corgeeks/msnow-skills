@@ -153,9 +153,10 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
     try { return store.atomic(fn); } catch (e) { cur = saved; throw e; }
   };
   // Retro is part of terminalization: callers run it in the same transaction that makes the run terminal.
+  const reviewFindings = (rows: NodeRun[]) => rows.filter((n) => n.node === 'review').flatMap((n) => parse(n.output).findings ?? []);
   const writeRetro = () => {
     const rows = store.listNodeRuns(runId);
-    const findings = rows.filter((n) => n.node === 'review').flatMap((n) => parse(n.output).findings ?? []);
+    const findings = reviewFindings(rows);
     const touches = parse(lastRow(rows, 'merge')?.output).touches_factory === true;
     begin('retro', Math.max(1, buildIteration(rows)));
     const retro = computeRetro(run(), rows, findings);
@@ -406,7 +407,8 @@ export async function runChange(ctx: ChangeContext): Promise<void> {
         const from = run().status;
         const live = from === 'running' || from === 'paused';
         if (!live && store.getRetro(runId)) return; // terminal and retro recorded: nothing to fail
-        const retro = computeRetro(run(), store.listNodeRuns(runId), []);
+        const rows = store.listNodeRuns(runId);
+        const retro = computeRetro(run(), rows, reviewFindings(rows));
         retro.notes = `node ${node} errored: ${message}`;
         store.recordRetro(retro);
         if (!live) return; // e.g. cleanup after a committed outcome: the retro still records the error

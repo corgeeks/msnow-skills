@@ -162,7 +162,9 @@ test('e2e', { concurrency: 1 }, async (t) => {
     assert.equal(wt2, join(f.root, '.factory', 'worktrees', `${item.id}-2`));
     assert.equal(f.store.getRun(run2.id).branch, `factory/${item.id}-2`);
     f.git(['fetch', '-q', 'origin']);
-    assert.equal(gitOut(wt2, ['merge-base', 'HEAD', 'origin/main']), f.git(['rev-parse', 'origin/main']));
+    const base = f.git(['rev-parse', 'origin/main']);
+    assert.equal(gitOut(wt2, ['rev-list', '--count', `${base}..HEAD`]), '1');
+    assert.equal(gitOut(wt2, ['rev-parse', 'HEAD^']), base);
   });
 
   await t.test('restart mid-run', async (t) => {
