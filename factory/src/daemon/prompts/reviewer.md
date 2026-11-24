@@ -33,6 +33,8 @@ Spec file: `{{spec_path}}`
 
 Review the diff against the spec's acceptance criteria and its Out of Scope section. Check correctness, missing criteria, and scope creep. Run the test command (`{{test_cmd}}`) if useful.
 
+Flag changes that make docs/factory/architecture.md inaccurate.
+
 ## Verdict
 
 End your reply with exactly one fenced `json` block, and nothing after it:

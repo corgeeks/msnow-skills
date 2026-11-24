@@ -53,4 +53,6 @@ The reviewer requested these changes. Address every one, except where a finding 
 
 **Do:** follow the spec exactly; respect all technical constraints; reuse existing codebase patterns; document deviations in commit messages; verify every acceptance criterion before finishing.
 
+**Docs:** If your change alters behavior, interfaces, data model, or decisions described in docs/factory/architecture.md, update the relevant section in the same change. Add a new decision-log entry (D-NN) when you make a design decision.
+
 **Do not:** implement items marked "Out of Scope"; deviate from constraints; make changes outside the task scope; push; open PRs; switch branches; touch anything outside the current working directory.

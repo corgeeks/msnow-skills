@@ -17,6 +17,12 @@ test('executor: no conditional sections when empty', () => {
   for (const s of ['status_script', 'log.md', 'update-task-status', 'Output Format']) assert.ok(!out.includes(s), s);
 });
 
+test('executor: architecture doc sync rule', () => {
+  const out = buildExecutorPrompt(exec);
+  assert.ok(out.includes('If your change alters behavior, interfaces, data model, or decisions described in docs/factory/architecture.md, update the relevant section in the same change.'));
+  assert.ok(out.includes('Add a new decision-log entry (D-NN) when you make a design decision.'));
+});
+
 test('executor: resume and failure sections', () => {
   const out = buildExecutorPrompt({ ...exec, resume: true, failure_output: 'BOOM 42', review_findings: '- fix x', human_notes: '- (failure gate, approve) try y' });
   assert.ok(out.includes('A previous session was interrupted'));
@@ -39,6 +45,7 @@ test('reviewer render', () => {
   assert.ok(out.includes('Do not modify, create, or delete any files, and do not commit. Changes you make will be reverted and reported.'));
   assert.ok(out.includes('{ "verdict": "approve" | "changes", "findings": [{ "severity": "blocking" | "advisory", "text": "..." }] }'));
   assert.ok(out.includes('a correctness, security, data-loss, or spec-violation problem in this change'));
+  assert.ok(out.includes('Flag changes that make docs/factory/architecture.md inaccurate.'));
   assert.ok(!/\{\{\w/.test(out));
 });
 

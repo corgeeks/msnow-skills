@@ -444,6 +444,11 @@ Verified locally on omp 19.1.0 and Node 24.16; keep them unless re-verified.
 - Decision: Add `override`, eligible only if the run's latest `test` node passed and its `head_sha` equals the run branch tip; otherwise 400. The test node records `{exit, head_sha, tail}` with `head_sha` sampled before the command. The pr node pushes that exact SHA and checks `headRefOid` after opening the PR.
 - Consequences: Never searches history; an ineligible gate still has retry and reject. `gates.decision` CHECK changed by a table-rebuild migration (v2). Existing test rows in the old plain-text format still render in prompts and retros but cannot be overridden.
 
+### D-44 Executor and reviewer keep this doc in sync
+- Context: The executor changed prompt behavior described here without updating the doc, which cost a review round (#52, gate 8).
+- Decision: `prompts/executor.md` requires a change that alters behavior, interfaces, data model, or decisions in this doc to update the relevant section in the same change, plus a D-NN entry for any design decision. `prompts/reviewer.md` flags changes that make this doc inaccurate.
+- Consequences: The doc is checked by prompt rule, not by a tool; a reviewer can miss drift.
+
 ## 9. Open risks and v1 backlog
 
 **Open risks**
