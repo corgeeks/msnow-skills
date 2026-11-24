@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { git, GitError, createQueue } from './git.ts';
+import { git, GitError, createQueue, gitSigningOffEnv } from './git.ts';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sf-git-'));
 
@@ -60,4 +60,13 @@ test('queue isolates failures', async () => {
 
 test('queue supports sync return', async () => {
   assert.equal(await createQueue().run(() => 'x'), 'x');
+});
+
+test('gitSigningOffEnv appends after existing GIT_CONFIG_COUNT entries', () => {
+  const env = gitSigningOffEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'x' });
+  assert.deepEqual(env, {
+    GIT_CONFIG_COUNT: '3',
+    GIT_CONFIG_KEY_1: 'commit.gpgsign', GIT_CONFIG_VALUE_1: 'false',
+    GIT_CONFIG_KEY_2: 'tag.gpgsign', GIT_CONFIG_VALUE_2: 'false',
+  });
 });
