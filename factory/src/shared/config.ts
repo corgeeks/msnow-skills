@@ -44,8 +44,7 @@ function merge(def: unknown, raw: unknown, path: string): unknown {
 
 export function parseConfig(raw: unknown): Config {
   const c = merge(DEFAULT_CONFIG, raw, '') as Config;
-  const micro = c.caps.itemCostUsd * 1e6; // spend is enforced in whole micro-dollars; a finer cap would silently round
-  if (!(Number.isFinite(micro) && micro >= 1 && Math.abs(micro - Math.round(micro)) < 1e-6)) throw new Error('config: caps.itemCostUsd must be a finite number of at least $0.000001, in whole micro-dollars');
+  if (!(Number.isFinite(c.caps.itemCostUsd) && c.caps.itemCostUsd > 0)) throw new Error('config: caps.itemCostUsd must be a finite number greater than 0');
   return c;
 }
 

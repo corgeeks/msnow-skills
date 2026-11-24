@@ -27,9 +27,8 @@ test('wrong type throws with path', () => {
   assert.throws(() => parseConfig({ roles: { reviewer: { x: 1 } } }), /roles\.reviewer\.x/);
 });
 
-test('caps.itemCostUsd rejects caps finer than a micro-dollar', () => {
-  for (const v of [0.0000001, 0.0150001]) assert.throws(() => parseConfig({ caps: { itemCostUsd: v } }), /caps\.itemCostUsd/);
-  assert.equal(parseConfig({ caps: { itemCostUsd: 0.000001 } }).caps.itemCostUsd, 0.000001);
+test('caps.itemCostUsd accepts sub-micro-dollar and non-whole-micro-dollar caps; rounding happens at comparison', () => {
+  for (const v of [0.0000001, 0.0150001, 16384.000003]) assert.equal(parseConfig({ caps: { itemCostUsd: v } }).caps.itemCostUsd, v);
 });
 
 test('caps.itemCostUsd defaults to 2 and must be positive', () => {

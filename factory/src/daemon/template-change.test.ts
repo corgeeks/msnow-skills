@@ -560,3 +560,33 @@ test('spend reported by a session survives post-session failure and counts towar
   assert.deepEqual(f.prompts.map((p) => p.role), ['build']); // no second paid session
   assert.match(f.store.listGates({ run_id: r2.id, open: true })[0].question, /has spent \$0\.01 \(cap \$0\.01\)/);
 });
+
+test('node spend from a prior run counts toward the item cap: the new run opens the cost gate before its second session and resumes on approval', async (t) => {
+  const f = setup(t);
+  // prior attempt: one build session cost $0.01, then the run failed
+  const prior = f.store.createNodeRun({ run_id: f.runId, node: 'build', iteration: 1 });
+  f.store.transitionNodeRun(prior.id, 'pending', 'running');
+  f.store.updateNodeRun(prior.id, { cost_usd: 0.01 });
+  f.store.transitionNodeRun(prior.id, 'running', 'completed');
+  f.store.transitionRun(f.runId, 'running', 'failed');
+
+  const r2 = f.store.createRun({ item_id: f.item.id, template: 'change', attempt: 2 });
+  f.store.updateRun(r2.id, { branch: f.wt.branch, worktree: f.wt.path });
+  f.store.transitionRun(r2.id, 'pending', 'running');
+  f.ctx = { ...f.ctx, config: { ...config, caps: { ...config.caps, itemCostUsd: 0.015 } }, runId: r2.id };
+  await runChange(f.ctx);
+
+  // build 1 runs ($0.01 prior + $0.01 = $0.02 ≥ $0.015), so review 1 is replaced by a cost gate
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build']);
+  const [g] = f.store.listGates({ run_id: r2.id, open: true });
+  assert.equal(g.kind, 'failure');
+  assert.equal(g.question, `Item #${f.item.id} has spent $0.02 (cap $0.015). Continue?`);
+  assert.equal(f.store.getItem(f.item.id).status, 'blocked');
+  assert.equal(f.store.getRun(r2.id).status, 'paused');
+
+  f.store.decideGate(g.id, 'approve'); // cap is now $0.03: review 1 runs and approves, reaching the merge gate
+  await runChange(f.ctx);
+  assert.deepEqual(f.prompts.map((p) => p.role), ['build', 'review']);
+  assert.equal(f.store.getItem(f.item.id).status, 'active');
+  assert.equal(f.store.listGates({ run_id: r2.id, open: true })[0].kind, 'merge');
+});
