@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { git, GitError, createQueue, gitSigningOffEnv } from './git.ts';
+import { git, GitError, createQueue, gitSigningOffEnv, gitRemoteEnv } from './git.ts';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sf-git-'));
 
@@ -68,5 +68,15 @@ test('gitSigningOffEnv appends after existing GIT_CONFIG_COUNT entries', () => {
     GIT_CONFIG_COUNT: '3',
     GIT_CONFIG_KEY_1: 'commit.gpgsign', GIT_CONFIG_VALUE_1: 'false',
     GIT_CONFIG_KEY_2: 'tag.gpgsign', GIT_CONFIG_VALUE_2: 'false',
+  });
+});
+
+test('gitRemoteEnv appends after existing GIT_CONFIG_COUNT entries', () => {
+  const env = gitRemoteEnv({ GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'x', GIT_CONFIG_KEY_1: 'commit.gpgsign', GIT_CONFIG_VALUE_1: 'false' });
+  assert.deepEqual(env, {
+    GIT_CONFIG_COUNT: '5',
+    GIT_CONFIG_KEY_2: 'url.https://github.com/.insteadOf', GIT_CONFIG_VALUE_2: 'git@github.com:',
+    GIT_CONFIG_KEY_3: 'credential.helper', GIT_CONFIG_VALUE_3: '',
+    GIT_CONFIG_KEY_4: 'credential.helper', GIT_CONFIG_VALUE_4: '!gh auth git-credential',
   });
 });
