@@ -160,11 +160,21 @@ test('e2e', { concurrency: 1 }, async (t) => {
     await waitFor(() => f.store.getItem(item.id).status === 'done' && f.store.getRetro(run.id));
   });
 
-  await t.test('override is a 400 when the latest test failed', async (t) => {
+  await t.test('override is a 400 when the latest test failed, even if an older test passed at the tip', async (t) => {
     const f = await setupFactory(t);
     writeFileSync(join(f.T, 'fail'), '');
     const item = f.queueItem();
     const gate = await openGate(f);
+    const run = f.store.getRun(gate.run_id);
+    const sha = f.git(['rev-parse', `refs/heads/${run.branch}`]);
+    // Rebuild the test rows as [passed, failed], both at the branch tip: only the latest row may decide eligibility.
+    f.db.prepare(`DELETE FROM node_runs WHERE run_id = ? AND node = 'test'`).run(run.id);
+    for (const [iteration, status] of [[1, 'completed'], [2, 'failed']] as const) {
+      const nr = f.store.createNodeRun({ run_id: run.id, node: 'test', iteration });
+      f.store.updateNodeRun(nr.id, { output: JSON.stringify({ head_sha: sha }) });
+      f.store.transitionNodeRun(nr.id, 'pending', 'running');
+      f.store.transitionNodeRun(nr.id, 'running', status);
+    }
     const res = await f.rawDecide(gate.id, 'override');
     assert.equal(res.status, 400);
     assert.equal(res.json.error!.code, 'bad_request');
