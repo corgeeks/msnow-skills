@@ -8,6 +8,8 @@ export type EngineDeps = Omit<ChangeContext, 'runId' | 'stopped'> & {
   worktrees: ChangeContext['worktrees'] & Pick<typeof Worktrees, 'createWorktree' | 'pruneWorktrees'>;
   runChange?: typeof realRunChange;
   tickMs?: number;
+  /** Minimum ms between origin fetches for the main-health check (default 60 s). */
+  mainPollMs?: number;
 };
 
 export function validateReviewerMapping(config: Config): void {
@@ -33,10 +35,14 @@ export function createEngine(deps: EngineDeps) {
   const ctxDeps = { ...deps };
   delete ctxDeps.runChange;
   delete ctxDeps.tickMs;
+  delete ctxDeps.mainPollMs;
 
   // Main health: one default-test run per origin/main SHA, cached in memory.
-  const mainResults = new Map<string, Omit<MainHealth, 'sha'>>();
+  type MainResult = Omit<MainHealth, 'sha'> & { exit_code: number; output: string };
+  const mainResults = new Map<string, MainResult>();
   let main: MainHealth | undefined;
+  let lastFetch = 0;
+  const mainPollMs = deps.mainPollMs ?? 60_000;
 
   const abort = new AbortController();
 
@@ -50,22 +56,30 @@ export function createEngine(deps: EngineDeps) {
 
   /**
    * Syncs `.factory/main` (in the forge queue) and tests it unless its SHA, or its code, was already tested.
+   * Fetches at most once per `mainPollMs`; a green main is not re-fetched while nothing is dispatchable.
    * Returns the SHA when main is green (the dispatch base), else undefined. Throws on infra errors, so dispatch stays closed.
    */
-  async function checkMain(): Promise<string | undefined> {
+  async function checkMain(dispatchable: boolean): Promise<string | undefined> {
+    const green = () => (!stopped && main?.status === 'green' ? main.sha : undefined);
+    if (main && (Date.now() - lastFetch < mainPollMs || (main.status === 'green' && !dispatchable))) return green();
+    lastFetch = Date.now();
     await forge.withMain(async ({ sha, path }) => {
-      let r = mainResults.get(sha) ?? (main && stateOnly(path, main.sha, sha) ? mainResults.get(main.sha) : undefined);
+      let r = mainResults.get(sha);
       if (!r) {
-        const t = await runTest(config.defaultTestCmd, path, abort.signal);
-        if (stopped) return; // killed by stop(): the result is meaningless
-        r = { status: t.code === 0 ? 'green' : 'red', checked_at: now() };
-        if (r.status === 'red') store.recordEvent('main.red', { sha, exit_code: t.code, output: t.tail.split('\n').slice(-50).join('\n') });
+        const prev = main && stateOnly(path, main.sha, sha) ? mainResults.get(main.sha) : undefined;
+        if (prev) r = prev;
+        else {
+          const t = await runTest(config.defaultTestCmd, path, abort.signal);
+          if (stopped) return; // killed by stop(): the result is meaningless
+          r = { status: t.code === 0 ? 'green' : 'red', checked_at: now(), exit_code: t.code, output: t.tail.split('\n').slice(-50).join('\n') };
+        }
+        mainResults.set(sha, r);
+        if (r.status === 'red') store.recordEvent('main.red', { sha, exit_code: r.exit_code, output: r.output });
       }
-      mainResults.set(sha, r);
       if (main?.status === 'red' && r.status === 'green') store.recordEvent('main.green', { sha });
-      main = { sha, ...r };
+      main = { sha, status: r.status, checked_at: r.checked_at };
     });
-    return !stopped && main?.status === 'green' ? main.sha : undefined;
+    return green();
   }
 
   function launch(runId: number) {
@@ -77,11 +91,14 @@ export function createEngine(deps: EngineDeps) {
   }
 
   async function dispatch() {
-    // Health first, every tick, so /api/health and main.green track origin/main even when nothing is dispatchable; eligibility and capacity are read after the (slow) check.
-    const base = await checkMain();
+    // Health first, every tick; eligibility and capacity are re-read after the (slow) check.
+    const eligible = () => {
+      const free = config.loop.maxParallel - store.listRuns({}).filter((r) => r.status === 'running').length;
+      return store.dispatchableItems().filter((i) => store.getChildren(i.id).length === 0).slice(0, Math.max(0, free));
+    };
+    const base = await checkMain(eligible().length > 0);
     if (!base) return;
-    const free = config.loop.maxParallel - store.listRuns({}).filter((r) => r.status === 'running').length;
-    const items = store.dispatchableItems().filter((i) => store.getChildren(i.id).length === 0).slice(0, Math.max(0, free));
+    const items = eligible();
     for (const item of items) {
       if (stopped) return;
       try {

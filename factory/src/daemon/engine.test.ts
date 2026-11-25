@@ -19,7 +19,7 @@ async function until(cond: () => boolean, ms = 3000) {
   for (const end = Date.now() + ms; !cond(); await sleep(10)) if (Date.now() > end) throw new Error('timed out');
 }
 
-function setup(t: TestContext, maxParallel = 2, failFirst = false) {
+function setup(t: TestContext, maxParallel = 2, failFirst = false, mainPollMs = 0) {
   const repos = makeRepos();
   const db = openDb(join(repos.dir, 'f.db'));
   const bus = createBus();
@@ -41,7 +41,7 @@ function setup(t: TestContext, maxParallel = 2, failFirst = false) {
   const forge = createForge({ root: repos.root, mainWorktree: repos.mainWorktree, queue: createQueue() });
   const engine = createEngine({
     store, bus, config, paths: { root: repos.root, sessionsDir: join(repos.dir, 'sessions') }, runSession,
-    worktrees, forge, committer: { flush: async () => {} }, runChange, tickMs: 60_000,
+    worktrees, forge, committer: { flush: async () => {} }, runChange, tickMs: 60_000, mainPollMs,
   });
   t.after(async () => { await engine.stop(); db.close(); rmSync(repos.dir, { recursive: true, force: true }); });
   const runIds = () => calls.map((c) => c.ctx.runId);
@@ -280,4 +280,54 @@ test('stop() kills a running main check', async (t) => {
   await engine.stop();
   assert.ok(Date.now() - started < 5000);
   assert.equal(engine.mainHealth(), undefined);
+});
+
+test('a factory.db-only commit on red main emits main.red for the new SHA without re-running the command', async (t) => {
+  const { store, engine, testRuns, pushMain, mainEvents } = setup(t);
+  const red = pushMain({ BROKEN: 'x' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  const dbSha = pushMain({ '.factory/factory.db': 'state' });
+  await engine.tick();
+  await engine.tick();
+  assert.equal(testRuns(), 1);
+  assert.deepEqual(mainEvents().map((e) => [e.type, e.data.sha, e.data.exit_code]), [['main.red', red, 1], ['main.red', dbSha, 1]]);
+  assert.match(String(mainEvents()[1].data.output), /broken main/);
+  assert.equal(engine.mainHealth()?.sha, dbSha);
+});
+
+test('origin is fetched at most once per poll interval', async (t) => {
+  const { store, engine, calls, pushMain } = setup(t, 5, false, 60_000);
+  const first = pushMain({ ok: '1' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  pushMain({ BROKEN: 'x' });
+  store.createItem({ title: 'b', status: 'queued' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, first);
+  assert.equal(calls.length, 2); // dispatched on the cached green result
+});
+
+test('a green main is not fetched while nothing is dispatchable', async (t) => {
+  const { store, engine, pushMain } = setup(t);
+  const first = pushMain({ ok: '1' });
+  await engine.tick();
+  pushMain({ ok: '2' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, first);
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  assert.notEqual(engine.mainHealth()?.sha, first);
+});
+
+test('red main keeps polling at the poll interval so main.green fires', async (t) => {
+  const { engine, pushMain, mainEvents } = setup(t, 2, false, 150);
+  pushMain({ BROKEN: 'x' });
+  await engine.tick();
+  pushMain({ BROKEN: null });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.status, 'red'); // within the interval
+  await sleep(200);
+  await engine.tick();
+  assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
 });
