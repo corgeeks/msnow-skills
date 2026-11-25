@@ -19,7 +19,7 @@ async function until(cond: () => boolean, ms = 3000) {
   for (const end = Date.now() + ms; !cond(); await sleep(10)) if (Date.now() > end) throw new Error('timed out');
 }
 
-function setup(t: TestContext, maxParallel = 2, failFirst = false, mainPollMs = 0) {
+function setup(t: TestContext, maxParallel = 2, failFirst = false, mainPollMs = 0, clock?: () => number) {
   const repos = makeRepos();
   const db = openDb(join(repos.dir, 'f.db'));
   const bus = createBus();
@@ -38,10 +38,11 @@ function setup(t: TestContext, maxParallel = 2, failFirst = false, mainPollMs = 
     if (failFirst && calls.length === 1) return realRunChange({ ...ctx, runSession: () => { throw new Error('boom'); } });
     return promise;
   };
-  const forge = createForge({ root: repos.root, mainWorktree: repos.mainWorktree, queue: createQueue() });
+  const queue = createQueue();
+  const forge = createForge({ root: repos.root, mainWorktree: repos.mainWorktree, queue });
   const engine = createEngine({
     store, bus, config, paths: { root: repos.root, sessionsDir: join(repos.dir, 'sessions') }, runSession,
-    worktrees, forge, committer: { flush: async () => {} }, runChange, tickMs: 60_000, mainPollMs,
+    worktrees, forge, committer: { flush: async () => {} }, runChange, tickMs: 60_000, mainPollMs, clock,
   });
   t.after(async () => { await engine.stop(); db.close(); rmSync(repos.dir, { recursive: true, force: true }); });
   const runIds = () => calls.map((c) => c.ctx.runId);
@@ -63,7 +64,7 @@ function setup(t: TestContext, maxParallel = 2, failFirst = false, mainPollMs = 
     return git(repos.root, ['rev-parse', 'HEAD']);
   };
   const mainEvents = () => store.listEvents().filter((e) => e.type.startsWith('main.'));
-  return { repos, config, store, engine, calls, runIds, pausedRun, testRuns, pushMain, mainEvents };
+  return { repos, config, store, engine, calls, runIds, pausedRun, testRuns, pushMain, mainEvents, queue };
 }
 
 test('dispatches up to maxParallel, then more as runs finish', async (t) => {
@@ -330,4 +331,42 @@ test('red main keeps polling at the poll interval so main.green fires', async (t
   await sleep(200);
   await engine.tick();
   assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
+});
+
+test('a failed fetch with no cached result is not retried within the poll interval', async (t) => {
+  let now = 0;
+  const { repos, store, engine } = setup(t, 2, false, 60_000, () => now);
+  store.createItem({ title: 'a', status: 'queued' });
+  const good = git(repos.root, ['remote', 'get-url', 'origin']);
+  git(repos.root, ['remote', 'set-url', 'origin', join(repos.dir, 'missing.git')]);
+  await engine.tick();
+  git(repos.root, ['remote', 'set-url', 'origin', good]);
+  now = 59_999;
+  await engine.tick();
+  assert.equal(engine.mainHealth(), undefined);
+  now = 60_000;
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.status, 'green');
+});
+
+test('the poll interval counts from the fetch, not from the request that waited in the forge queue', async (t) => {
+  let now = 0;
+  const { store, engine, queue, pushMain } = setup(t, 2, false, 60_000, () => now);
+  const first = pushMain({ ok: '1' });
+  store.createItem({ title: 'a', status: 'queued' });
+  const gate = Promise.withResolvers<void>();
+  const held = queue.run(() => gate.promise);
+  const ticking = engine.tick();
+  now = 100_000;
+  gate.resolve();
+  await held;
+  await ticking;
+  pushMain({ ok: '2' });
+  now = 130_000;
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, first); // 30 s after the fetch: no new fetch
+  now = 160_000;
+  store.createItem({ title: 'b', status: 'queued' });
+  await engine.tick();
+  assert.notEqual(engine.mainHealth()?.sha, first);
 });

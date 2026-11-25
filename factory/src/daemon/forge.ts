@@ -68,8 +68,9 @@ export function createForge(o: { root: string; mainWorktree: string; queue: Queu
     }),
     fetch: () => run(fetchNow),
     syncMain: () => run(syncNow),
-    /** Syncs `.factory/main`, then runs `fn` with its HEAD sha and path inside the queue, so no state commit or merge can move it meanwhile. */
-    withMain: <T>(fn: (m: { sha: string; path: string }) => Promise<T>) => run(async () => {
+    /** Syncs `.factory/main`, then runs `fn` with its HEAD sha and path inside the queue, so no state commit or merge can move it meanwhile. `due` is asked inside the queue, right before the fetch; false skips the sync and `fn` (resolves undefined). */
+    withMain: <T>(fn: (m: { sha: string; path: string }) => Promise<T>, due?: () => boolean) => run(async () => {
+      if (due && !due()) return undefined;
       syncNow();
       return fn({ sha: git(o.mainWorktree, ['rev-parse', 'HEAD']), path: o.mainWorktree });
     }),

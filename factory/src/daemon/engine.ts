@@ -10,6 +10,8 @@ export type EngineDeps = Omit<ChangeContext, 'runId' | 'stopped'> & {
   tickMs?: number;
   /** Minimum ms between origin fetches for the main-health check (default 60 s). */
   mainPollMs?: number;
+  /** Clock for the fetch interval (ms); tests inject one. */
+  clock?: () => number;
 };
 
 export function validateReviewerMapping(config: Config): void {
@@ -36,12 +38,14 @@ export function createEngine(deps: EngineDeps) {
   delete ctxDeps.runChange;
   delete ctxDeps.tickMs;
   delete ctxDeps.mainPollMs;
+  delete ctxDeps.clock;
 
   // Main health: one default-test run per origin/main SHA, cached in memory.
-  type MainResult = Omit<MainHealth, 'sha'> & { exit_code: number; output: string };
+  type MainResult = Omit<MainHealth, 'sha'> & { exit_code: number | string; output: string };
   const mainResults = new Map<string, MainResult>();
   let main: MainHealth | undefined;
-  let lastFetch = 0;
+  let lastFetch: number | undefined;
+  const clock = deps.clock ?? Date.now;
   const mainPollMs = deps.mainPollMs ?? 60_000;
 
   const abort = new AbortController();
@@ -61,8 +65,14 @@ export function createEngine(deps: EngineDeps) {
    */
   async function checkMain(dispatchable: boolean): Promise<string | undefined> {
     const green = () => (!stopped && main?.status === 'green' ? main.sha : undefined);
-    if (main && (Date.now() - lastFetch < mainPollMs || (main.status === 'green' && !dispatchable))) return green();
-    lastFetch = Date.now();
+    // Decided inside the queue, at the fetch attempt: a failed fetch (no cached result) or a queue delay cannot cause a second fetch within the interval.
+    const due = () => {
+      if (main?.status === 'green' && !dispatchable) return false;
+      const t = clock();
+      if (lastFetch !== undefined && t - lastFetch < mainPollMs) return false;
+      lastFetch = t;
+      return true;
+    };
     await forge.withMain(async ({ sha, path }) => {
       let r = mainResults.get(sha);
       if (!r) {
@@ -78,7 +88,7 @@ export function createEngine(deps: EngineDeps) {
       }
       if (main?.status === 'red' && r.status === 'green') store.recordEvent('main.green', { sha });
       main = { sha, status: r.status, checked_at: r.checked_at };
-    });
+    }, due);
     return green();
   }
 
