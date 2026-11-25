@@ -1,7 +1,8 @@
 import { ConflictError } from './store.ts';
-import { runChange as realRunChange, INTERRUPTED, type ChangeContext } from './template-change.ts';
+import { git } from './git.ts';
+import { runChange as realRunChange, runTest, INTERRUPTED, type ChangeContext } from './template-change.ts';
 import type * as Worktrees from './worktrees.ts';
-import type { Config, FactoryEvent, ItemStatus } from '../shared/types.ts';
+import type { Config, FactoryEvent, ItemStatus, MainHealth } from '../shared/types.ts';
 
 export type EngineDeps = Omit<ChangeContext, 'runId' | 'stopped'> & {
   worktrees: ChangeContext['worktrees'] & Pick<typeof Worktrees, 'createWorktree' | 'pruneWorktrees'>;
@@ -33,6 +34,31 @@ export function createEngine(deps: EngineDeps) {
   delete ctxDeps.runChange;
   delete ctxDeps.tickMs;
 
+  // Main health: one default-test run per origin/main SHA, cached in memory.
+  const mainResults = new Map<string, Omit<MainHealth, 'sha'>>();
+  let main: MainHealth | undefined;
+
+  /** A commit that only touches the state DB cannot change test outcomes. */
+  function stateOnly(cwd: string, from: string, to: string): boolean {
+    try { return git(cwd, ['diff', '--name-only', from, to]).split('\n').filter(Boolean).every((f) => f === '.factory/factory.db'); } catch { return false; }
+  }
+
+  /** Syncs `.factory/main` (in the forge queue) and tests it unless its SHA, or its code, was already tested. Throws on infra errors, so dispatch stays closed. */
+  async function mainIsGreen(): Promise<boolean> {
+    await forge.withMain(async ({ sha, path }) => {
+      let r = mainResults.get(sha) ?? (main && stateOnly(path, main.sha, sha) ? mainResults.get(main.sha) : undefined);
+      if (!r) {
+        const t = await runTest(config.defaultTestCmd, path);
+        r = { status: t.code === 0 ? 'green' : 'red', checked_at: now() };
+        if (r.status === 'red') store.recordEvent('main.red', { sha, exit_code: t.code, output: t.tail.split('\n').slice(-50).join('\n') });
+      }
+      mainResults.set(sha, r);
+      if (main?.status === 'red' && r.status === 'green') store.recordEvent('main.green', { sha });
+      main = { sha, ...r };
+    });
+    return main!.status === 'green';
+  }
+
   function launch(runId: number) {
     if (stopped || inFlight.has(runId)) return;
     const p = runChange({ ...ctxDeps, runId, stopped: () => stopped })
@@ -44,6 +70,7 @@ export function createEngine(deps: EngineDeps) {
   async function dispatch() {
     const free = config.loop.maxParallel - store.listRuns({}).filter((r) => r.status === 'running').length;
     const items = store.dispatchableItems().filter((i) => store.getChildren(i.id).length === 0).slice(0, Math.max(0, free));
+    if (!items.length || !(await mainIsGreen())) return;
     for (const item of items) {
       if (stopped) return;
       try {
@@ -141,6 +168,7 @@ export function createEngine(deps: EngineDeps) {
       clearInterval(timer);
       await ticking;
     },
+    mainHealth: (): MainHealth | undefined => main,
     /** @internal for tests */
     tick,
   };

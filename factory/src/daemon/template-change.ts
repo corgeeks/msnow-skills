@@ -134,7 +134,7 @@ function derive({ run, nodeRuns, gates, retro, config }: StepInput): Step {
 }
 
 /** `sh -c cmd` in cwd; stdout+stderr interleaved; process group killed at the timeout. */
-function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tail: string }> {
+export function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tail: string }> {
   const { promise, resolve } = Promise.withResolvers<{ code: number | string; tail: string }>();
   const child = spawn('sh', ['-c', cmd], { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...gitSigningOffEnv() } });
   let out = '';

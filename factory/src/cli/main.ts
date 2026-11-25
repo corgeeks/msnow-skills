@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { loadConfig } from '../shared/config.ts';
 import { resolvePaths } from '../daemon/paths.ts';
-import { TIERS, type BatchItem, type BatchResult, type GateWithPr, type ItemDetail, type ItemSummary, type RunDetail } from '../shared/types.ts';
+import { TIERS, type BatchItem, type BatchResult, type GateWithPr, type ItemDetail, type ItemSummary, type MainHealth, type RunDetail } from '../shared/types.ts';
 import { ApiError, createClient, DaemonUnreachableError, type Client } from './client.ts';
 import { buildImportBatch } from './import.ts';
 
@@ -150,6 +150,7 @@ export async function main(argv: string[]): Promise<number> {
 
 async function status(api: Client, json: boolean, pos: string[]): Promise<number> {
   if (pos.length) throw new UsageError('status takes no positional arguments');
+  const { main }: { main: MainHealth | null } = await api.get('/api/health');
   const items: ItemSummary[] = await api.get('/api/items');
   const gates: GateWithPr[] = await api.get('/api/gates?open=1');
   const counts: Record<string, number> = {};
@@ -165,7 +166,8 @@ async function status(api: Client, json: boolean, pos: string[]): Promise<number
     });
   }
   const waiting = items.filter((i) => i.status === 'queued' && i.open_deps > 0).map((i) => ({ id: i.id, title: i.title, open_deps: i.open_deps }));
-  if (json) { out(JSON.stringify({ counts, active, gates, waiting })); return 0; }
+  if (json) { out(JSON.stringify({ main, counts, active, gates, waiting })); return 0; }
+  out(main ? `main: ${main.status} @ ${main.sha.slice(0, 7)}` : 'main: unchecked');
   out(Object.entries(counts).map(([k, n]) => `${k}: ${n}`).join('  ') || 'no items');
   if (active.length) out('active:');
   for (const a of active) out(`  #${a.id} ${a.title} run ${a.run_id ?? '-'}${a.node ? ` node ${a.node}` : ''}${a.pr_url ? ` ${a.pr_url}` : ''}`);

@@ -68,6 +68,11 @@ export function createForge(o: { root: string; mainWorktree: string; queue: Queu
     }),
     fetch: () => run(fetchNow),
     syncMain: () => run(syncNow),
+    /** Syncs `.factory/main`, then runs `fn` with its HEAD sha and path inside the queue, so no state commit or merge can move it meanwhile. */
+    withMain: <T>(fn: (m: { sha: string; path: string }) => Promise<T>) => run(async () => {
+      syncNow();
+      return fn({ sha: git(o.mainWorktree, ['rev-parse', 'HEAD']), path: o.mainWorktree });
+    }),
     /** `sha` pushes exactly that commit to the branch (the override path); default pushes the branch tip. */
     pushBranch: (worktreePath: string, branch: string, sha?: string) => run(() => {
       git(worktreePath, ['push', '--force-with-lease', 'origin', sha ? `${sha}:refs/heads/${branch}` : branch]);
