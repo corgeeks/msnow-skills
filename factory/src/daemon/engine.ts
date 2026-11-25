@@ -38,17 +38,26 @@ export function createEngine(deps: EngineDeps) {
   const mainResults = new Map<string, Omit<MainHealth, 'sha'>>();
   let main: MainHealth | undefined;
 
-  /** A commit that only touches the state DB cannot change test outcomes. */
+  const abort = new AbortController();
+
+  /** A commit that only touches the state DB cannot change test outcomes. `--no-renames` so a rename cannot hide a second path; an empty diff (same tree, other SHA) is not state-only. */
   function stateOnly(cwd: string, from: string, to: string): boolean {
-    try { return git(cwd, ['diff', '--name-only', from, to]).split('\n').filter(Boolean).every((f) => f === '.factory/factory.db'); } catch { return false; }
+    try {
+      const files = git(cwd, ['diff', '--name-only', '--no-renames', from, to]).split('\n').filter(Boolean);
+      return files.length === 1 && files[0] === '.factory/factory.db';
+    } catch { return false; }
   }
 
-  /** Syncs `.factory/main` (in the forge queue) and tests it unless its SHA, or its code, was already tested. Throws on infra errors, so dispatch stays closed. */
-  async function mainIsGreen(): Promise<boolean> {
+  /**
+   * Syncs `.factory/main` (in the forge queue) and tests it unless its SHA, or its code, was already tested.
+   * Returns the SHA when main is green (the dispatch base), else undefined. Throws on infra errors, so dispatch stays closed.
+   */
+  async function checkMain(): Promise<string | undefined> {
     await forge.withMain(async ({ sha, path }) => {
       let r = mainResults.get(sha) ?? (main && stateOnly(path, main.sha, sha) ? mainResults.get(main.sha) : undefined);
       if (!r) {
-        const t = await runTest(config.defaultTestCmd, path);
+        const t = await runTest(config.defaultTestCmd, path, abort.signal);
+        if (stopped) return; // killed by stop(): the result is meaningless
         r = { status: t.code === 0 ? 'green' : 'red', checked_at: now() };
         if (r.status === 'red') store.recordEvent('main.red', { sha, exit_code: t.code, output: t.tail.split('\n').slice(-50).join('\n') });
       }
@@ -56,7 +65,7 @@ export function createEngine(deps: EngineDeps) {
       if (main?.status === 'red' && r.status === 'green') store.recordEvent('main.green', { sha });
       main = { sha, ...r };
     });
-    return main!.status === 'green';
+    return !stopped && main?.status === 'green' ? main.sha : undefined;
   }
 
   function launch(runId: number) {
@@ -68,9 +77,11 @@ export function createEngine(deps: EngineDeps) {
   }
 
   async function dispatch() {
+    // Health first, every tick, so /api/health and main.green track origin/main even when nothing is dispatchable; eligibility and capacity are read after the (slow) check.
+    const base = await checkMain();
+    if (!base) return;
     const free = config.loop.maxParallel - store.listRuns({}).filter((r) => r.status === 'running').length;
     const items = store.dispatchableItems().filter((i) => store.getChildren(i.id).length === 0).slice(0, Math.max(0, free));
-    if (!items.length || !(await mainIsGreen())) return;
     for (const item of items) {
       if (stopped) return;
       try {
@@ -81,8 +92,7 @@ export function createEngine(deps: EngineDeps) {
       }
       try {
         const attempt = Math.max(0, ...store.listRuns({ item_id: item.id }).map((r) => r.attempt)) + 1;
-        await forge.fetch();
-        const w = wt.createWorktree(paths.root, { itemId: item.id, attempt, base: 'origin/main' });
+        const w = wt.createWorktree(paths.root, { itemId: item.id, attempt, base }); // the tested SHA, never a moving origin/main
         const run = store.createRun({ item_id: item.id, template: 'change', attempt });
         store.updateRun(run.id, { branch: w.branch, worktree: w.path, started_at: now() });
         store.transitionRun(run.id, 'pending', 'running');
@@ -164,6 +174,7 @@ export function createEngine(deps: EngineDeps) {
     },
     async stop() {
       stopped = true;
+      abort.abort();
       unsubscribe?.();
       clearInterval(timer);
       await ticking;

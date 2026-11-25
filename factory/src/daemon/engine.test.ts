@@ -63,7 +63,7 @@ function setup(t: TestContext, maxParallel = 2, failFirst = false) {
     return git(repos.root, ['rev-parse', 'HEAD']);
   };
   const mainEvents = () => store.listEvents().filter((e) => e.type.startsWith('main.'));
-  return { repos, store, engine, calls, runIds, pausedRun, testRuns, pushMain, mainEvents };
+  return { repos, config, store, engine, calls, runIds, pausedRun, testRuns, pushMain, mainEvents };
 }
 
 test('dispatches up to maxParallel, then more as runs finish', async (t) => {
@@ -248,4 +248,36 @@ test('a factory.db-only commit reuses the previous main result; a code commit re
   pushMain({ '.factory/factory.db': 'state2', 'src.txt': 'code' });
   await engine.tick();
   assert.equal(testRuns(), 2);
+});
+
+test('health refreshes on a tick with nothing dispatchable', async (t) => {
+  const { engine, pushMain, mainEvents } = setup(t);
+  pushMain({ BROKEN: 'x' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.status, 'red');
+  const fixed = pushMain({ BROKEN: null });
+  await engine.tick();
+  assert.deepEqual({ sha: engine.mainHealth()?.sha, status: engine.mainHealth()?.status }, { sha: fixed, status: 'green' });
+  assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
+});
+
+test('the worktree is created from the checked SHA', async (t) => {
+  const { store, engine, calls, pushMain } = setup(t);
+  const sha = pushMain({ ok: 'x' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, sha);
+  assert.equal(git(calls[0].ctx.paths.root, ['rev-parse', 'factory/1-1']), sha);
+});
+
+test('stop() kills a running main check', async (t) => {
+  const { store, engine, config } = setup(t);
+  config.defaultTestCmd = 'sleep 30';
+  store.createItem({ title: 'a', status: 'queued' });
+  void engine.tick();
+  await sleep(300);
+  const started = Date.now();
+  await engine.stop();
+  assert.ok(Date.now() - started < 5000);
+  assert.equal(engine.mainHealth(), undefined);
 });
