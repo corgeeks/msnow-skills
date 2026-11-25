@@ -11,7 +11,7 @@ export const DEFAULT_CONFIG: Config = {
   caps: { sessionMinutes: 30, sessionCostUsd: 5, itemCostUsd: 2 },
   loop: { maxBuildAttempts: 3, maxReviewRounds: 2, maxParallel: 2 },
   git: { stateCommitPrefix: 'factory: state', stateCommitDebounceSec: 60 },
-  defaultTestCmd: 'npm test --prefix factory',
+  defaultTestCmd: 'npm ci --prefix factory --prefer-offline --no-audit --no-fund && npm test --prefix factory && npm run typecheck --prefix factory',
 };
 
 // Maps whose keys are open (any string key, string value).
