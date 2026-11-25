@@ -6,7 +6,7 @@ import { git } from './git.ts';
 import { isCostGate, testedSha } from './template-change.ts';
 import { ConflictError, CycleError, NotFoundError, type Store } from './store.ts';
 import type { Bus } from './bus.ts';
-import { ITEM_STATUSES, TIERS, type FactoryEvent } from '../shared/types.ts';
+import { ITEM_STATUSES, TIERS, type FactoryEvent, type MainHealth } from '../shared/types.ts';
 
 class BadRequest extends Error {}
 class TooLarge extends Error {}
@@ -87,12 +87,12 @@ function checkOverride(store: Store, root: string, gateId: number): void {
   if (tip !== sha) bad(`branch ${run.branch} is at ${tip ?? 'nothing'}, not the tested commit ${sha}`);
 }
 
-export function createApiServer(opts: { store: Store; bus: Bus; uiDir: string; root: string }): http.Server {
+export function createApiServer(opts: { store: Store; bus: Bus; uiDir: string; root: string; mainHealth?: () => MainHealth | undefined }): http.Server {
   const { store, bus, root } = opts;
   const uiDir = resolve(opts.uiDir);
 
   const routes: Route[] = [
-    { method: 'GET', pattern: /^\/api\/health$/, handler: () => ({ ok: true, pid: process.pid, schemaVersion: MIGRATIONS.length }) },
+    { method: 'GET', pattern: /^\/api\/health$/, handler: () => ({ ok: true, pid: process.pid, schemaVersion: MIGRATIONS.length, main: opts.mainHealth?.() ?? null }) },
     {
       method: 'GET', pattern: /^\/api\/items$/, handler: ({ q }) => {
         const status = q.get('status') || undefined;

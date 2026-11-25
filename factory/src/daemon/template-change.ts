@@ -133,22 +133,22 @@ function derive({ run, nodeRuns, gates, retro, config }: StepInput): Step {
   throw new Error(`no next step (build #${it} ${build.status}, test ${test?.status ?? 'none'}, review ${review?.status ?? 'none'})`);
 }
 
-/** `sh -c cmd` in cwd; stdout+stderr interleaved; process group killed at the timeout. */
-function runTest(cmd: string, cwd: string): Promise<{ code: number | string; tail: string }> {
+/** `sh -c cmd` in cwd; stdout+stderr interleaved; process group killed at the timeout or when `signal` aborts. */
+export function runTest(cmd: string, cwd: string, signal?: AbortSignal): Promise<{ code: number | string; tail: string }> {
   const { promise, resolve } = Promise.withResolvers<{ code: number | string; tail: string }>();
   const child = spawn('sh', ['-c', cmd], { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...gitSigningOffEnv() } });
   let out = '';
   let timedOut = false;
   const add = (c: string) => { out += c; if (out.length > 1 << 20) out = out.slice(-(1 << 19)); };
   for (const s of [child.stdout, child.stderr]) { s.setEncoding('utf8'); s.on('data', add); }
-  const timer = setTimeout(() => {
-    timedOut = true;
-    try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already gone */ }
-  }, TEST_TIMEOUT_MS);
+  const killGroup = () => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already gone */ } };
+  const timer = setTimeout(() => { timedOut = true; killGroup(); }, TEST_TIMEOUT_MS);
+  if (signal?.aborted) killGroup(); else signal?.addEventListener('abort', killGroup, { once: true });
   child.on('error', (e) => add(`${e.message}\n`));
-  child.on('close', (code, signal) => {
+  child.on('close', (code, sig) => {
     clearTimeout(timer);
-    resolve({ code: timedOut ? 'timeout' : code ?? signal ?? 'unknown', tail: out.replace(/\n$/, '').split('\n').slice(-200).join('\n') });
+    signal?.removeEventListener('abort', killGroup);
+    resolve({ code: timedOut ? 'timeout' : code ?? sig ?? 'unknown', tail: out.replace(/\n$/, '').split('\n').slice(-200).join('\n') });
   });
   return promise;
 }

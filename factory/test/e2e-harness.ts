@@ -55,7 +55,8 @@ export async function setupFactory(t: TestContext, opts: { script?: Script } = {
   mkdirSync(join(seed, 'factory'));
   writeFileSync(join(seed, 'factory', 'README.md'), '# factory\n');
   writeFileSync(join(seed, 'test.sh'),
-    `echo running tests\nif [ -e '${T}/fail' ]; then echo boom; exit 1; fi\n` +
+    // Marker files make the item's tests fail, not the main-health check (also `defaultTestCmd`, run in .factory/main).
+    `case "$PWD" in */.factory/main) echo main ok; exit 0;; esac\necho running tests\nif [ -e '${T}/fail' ]; then echo boom; exit 1; fi\n` +
     `if [ -e '${T}/fail-once' ]; then rm '${T}/fail-once'; echo boom-once; exit 1; fi\necho ok\n`);
   gitOut(seed, ['add', '-A']);
   gitOut(seed, ['commit', '-qm', 'seed']);

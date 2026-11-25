@@ -339,6 +339,8 @@ export function createStore(db: DatabaseSync, bus: Bus) {
     },
 
     // ── events ──
+    /** Persists and publishes an event that belongs to no item or run (`main.red`, `main.green`). */
+    recordEvent(type: EventType, data: Record<string, unknown>): void { mutate(() => emit(type, {}, data)); },
     listEvents(f: { after?: number; limit?: number } = {}): FactoryEvent[] {
       return all<FactoryEvent & { data: string }>(`SELECT * FROM events WHERE seq > ? ORDER BY seq LIMIT ?`,
         f.after ?? 0, f.limit ?? 100).map((e) => ({ ...e, data: JSON.parse(e.data) }));

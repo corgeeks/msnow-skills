@@ -1,12 +1,17 @@
 import { ConflictError } from './store.ts';
-import { runChange as realRunChange, INTERRUPTED, type ChangeContext } from './template-change.ts';
+import { git } from './git.ts';
+import { runChange as realRunChange, runTest, INTERRUPTED, type ChangeContext } from './template-change.ts';
 import type * as Worktrees from './worktrees.ts';
-import type { Config, FactoryEvent, ItemStatus } from '../shared/types.ts';
+import type { Config, FactoryEvent, ItemStatus, MainHealth } from '../shared/types.ts';
 
 export type EngineDeps = Omit<ChangeContext, 'runId' | 'stopped'> & {
   worktrees: ChangeContext['worktrees'] & Pick<typeof Worktrees, 'createWorktree' | 'pruneWorktrees'>;
   runChange?: typeof realRunChange;
   tickMs?: number;
+  /** Minimum ms between origin fetches for the main-health check (default 60 s). */
+  mainPollMs?: number;
+  /** Clock for the fetch interval (ms); tests inject one. */
+  clock?: () => number;
 };
 
 export function validateReviewerMapping(config: Config): void {
@@ -32,6 +37,60 @@ export function createEngine(deps: EngineDeps) {
   const ctxDeps = { ...deps };
   delete ctxDeps.runChange;
   delete ctxDeps.tickMs;
+  delete ctxDeps.mainPollMs;
+  delete ctxDeps.clock;
+
+  // Main health: one default-test run per origin/main SHA, cached in memory.
+  type MainResult = Omit<MainHealth, 'sha'> & { exit_code: number | string; output: string };
+  const mainResults = new Map<string, MainResult>();
+  let main: MainHealth | undefined;
+  let lastFetch: number | undefined;
+  const clock = deps.clock ?? Date.now;
+  const mainPollMs = deps.mainPollMs ?? 60_000;
+
+  const abort = new AbortController();
+
+  /** A commit that only touches the state DB cannot change test outcomes. `--no-renames` so a rename cannot hide a second path; an empty diff (same tree, other SHA) is not state-only. */
+  function stateOnly(cwd: string, from: string, to: string): boolean {
+    try {
+      const files = git(cwd, ['diff', '--name-only', '--no-renames', from, to]).split('\n').filter(Boolean);
+      return files.length === 1 && files[0] === '.factory/factory.db';
+    } catch { return false; }
+  }
+
+  /**
+   * Syncs `.factory/main` (in the forge queue) and tests it unless its SHA, or its code, was already tested.
+   * Fetches at most once per `mainPollMs`; a green main is not re-fetched while nothing is dispatchable.
+   * Returns the SHA when main is green (the dispatch base), else undefined. Throws on infra errors, so dispatch stays closed.
+   */
+  async function checkMain(dispatchable: boolean): Promise<string | undefined> {
+    const green = () => (!stopped && main?.status === 'green' ? main.sha : undefined);
+    // Decided inside the queue, at the fetch attempt: a failed fetch (no cached result) or a queue delay cannot cause a second fetch within the interval.
+    const due = () => {
+      if (main?.status === 'green' && !dispatchable) return false;
+      const t = clock();
+      if (lastFetch !== undefined && t - lastFetch < mainPollMs) return false;
+      lastFetch = t;
+      return true;
+    };
+    await forge.withMain(async ({ sha, path }) => {
+      let r = mainResults.get(sha);
+      if (!r) {
+        const prev = main && stateOnly(path, main.sha, sha) ? mainResults.get(main.sha) : undefined;
+        if (prev) r = prev;
+        else {
+          const t = await runTest(config.defaultTestCmd, path, abort.signal);
+          if (stopped) return; // killed by stop(): the result is meaningless
+          r = { status: t.code === 0 ? 'green' : 'red', checked_at: now(), exit_code: t.code, output: t.tail.split('\n').slice(-50).join('\n') };
+        }
+        mainResults.set(sha, r);
+        if (r.status === 'red') store.recordEvent('main.red', { sha, exit_code: r.exit_code, output: r.output });
+      }
+      if (main?.status === 'red' && r.status === 'green') store.recordEvent('main.green', { sha });
+      main = { sha, status: r.status, checked_at: r.checked_at };
+    }, due);
+    return green();
+  }
 
   function launch(runId: number) {
     if (stopped || inFlight.has(runId)) return;
@@ -42,8 +101,14 @@ export function createEngine(deps: EngineDeps) {
   }
 
   async function dispatch() {
-    const free = config.loop.maxParallel - store.listRuns({}).filter((r) => r.status === 'running').length;
-    const items = store.dispatchableItems().filter((i) => store.getChildren(i.id).length === 0).slice(0, Math.max(0, free));
+    // Health first, every tick; eligibility and capacity are re-read after the (slow) check.
+    const eligible = () => {
+      const free = config.loop.maxParallel - store.listRuns({}).filter((r) => r.status === 'running').length;
+      return store.dispatchableItems().filter((i) => store.getChildren(i.id).length === 0).slice(0, Math.max(0, free));
+    };
+    const base = await checkMain(eligible().length > 0);
+    if (!base) return;
+    const items = eligible();
     for (const item of items) {
       if (stopped) return;
       try {
@@ -54,8 +119,7 @@ export function createEngine(deps: EngineDeps) {
       }
       try {
         const attempt = Math.max(0, ...store.listRuns({ item_id: item.id }).map((r) => r.attempt)) + 1;
-        await forge.fetch();
-        const w = wt.createWorktree(paths.root, { itemId: item.id, attempt, base: 'origin/main' });
+        const w = wt.createWorktree(paths.root, { itemId: item.id, attempt, base }); // the tested SHA, never a moving origin/main
         const run = store.createRun({ item_id: item.id, template: 'change', attempt });
         store.updateRun(run.id, { branch: w.branch, worktree: w.path, started_at: now() });
         store.transitionRun(run.id, 'pending', 'running');
@@ -137,10 +201,12 @@ export function createEngine(deps: EngineDeps) {
     },
     async stop() {
       stopped = true;
+      abort.abort();
       unsubscribe?.();
       clearInterval(timer);
       await ticking;
     },
+    mainHealth: (): MainHealth | undefined => main,
     /** @internal for tests */
     tick,
   };

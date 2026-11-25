@@ -133,7 +133,7 @@ test('undep removes a dependency; missing edge exits 1', async () => {
 
 test('status --json and show --json keys; show 999', async () => {
   assert.equal(await run('status', '--json'), 0, stderr);
-  assert.deepEqual(Object.keys(JSON.parse(stdout)).sort(), ['active', 'counts', 'gates', 'waiting']);
+  assert.deepEqual(Object.keys(JSON.parse(stdout)).sort(), ['active', 'counts', 'gates', 'main', 'waiting']);
   stdout = '';
   assert.equal(await run('show', '1', '--json'), 0, stderr);
   assert.deepEqual(Object.keys(JSON.parse(stdout)).sort(), ['children', 'dependents', 'deps', 'item', 'runs']);

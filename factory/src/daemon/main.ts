@@ -26,7 +26,8 @@ if (!existsSync(paths.liveDb) && existsSync(paths.committedDb)) copyFileSync(pat
 const db = openDb(paths.liveDb);
 const bus = createBus();
 const store = createStore(db, bus);
-const server = createApiServer({ store, bus, uiDir: paths.uiDir, root: paths.root });
+let engine: ReturnType<typeof createEngine> | undefined; // the server is up (instance lock) before the engine exists
+const server = createApiServer({ store, bus, uiDir: paths.uiDir, root: paths.root, mainHealth: () => engine?.mainHealth() });
 
 // Take the instance lock before touching shared state: a losing second daemon must not reset .factory/main.
 try {
@@ -63,7 +64,7 @@ const committer = createStateCommitter({
 onShutdown(async () => { committer.stop(); await committer.flush('shutdown'); });
 onShutdown(() => killAllSessions());
 installSignalHandlers({ server, db });
-const engine = createEngine({ store, bus, config, paths, runSession, worktrees, forge, committer });
-onShutdown(() => engine.stop());
+engine = createEngine({ store, bus, config, paths, runSession, worktrees, forge, committer });
+onShutdown(() => engine!.stop());
 console.log(`factory daemon listening on http://127.0.0.1:${(server.address() as AddressInfo).port} (root ${paths.root})`);
 await engine.start();

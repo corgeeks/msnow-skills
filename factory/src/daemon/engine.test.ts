@@ -1,6 +1,6 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { openDb } from './db.ts';
@@ -12,19 +12,24 @@ import { DEFAULT_CONFIG } from '../shared/config.ts';
 import { createEngine, validateReviewerMapping } from './engine.ts';
 import { INTERRUPTED, runChange as realRunChange, type ChangeContext } from './template-change.ts';
 import { makeRepos } from '../../test/fixtures/git-repos.ts';
-import type { Forge } from './forge.ts';
+import { createForge } from './forge.ts';
+import { createQueue, git } from './git.ts';
 
 async function until(cond: () => boolean, ms = 3000) {
   for (const end = Date.now() + ms; !cond(); await sleep(10)) if (Date.now() > end) throw new Error('timed out');
 }
 
-function setup(t: TestContext, maxParallel = 2, failFirst = false) {
+function setup(t: TestContext, maxParallel = 2, failFirst = false, mainPollMs = 0, clock?: () => number) {
   const repos = makeRepos();
   const db = openDb(join(repos.dir, 'f.db'));
   const bus = createBus();
   const store = createStore(db, bus);
   const config = structuredClone(DEFAULT_CONFIG);
   config.loop.maxParallel = maxParallel;
+  // Red while BROKEN exists on main; each run is logged outside the worktree.
+  const testLog = join(repos.dir, 'main-tests.log');
+  config.defaultTestCmd = `echo run >> ${testLog}; echo broken main; test ! -e BROKEN`;
+  git(repos.root, ['worktree', 'add', '--detach', repos.mainWorktree, 'origin/main']);
   const calls: { ctx: ChangeContext; resolve: () => void }[] = [];
   const runChange = (ctx: ChangeContext) => {
     const { promise, resolve } = Promise.withResolvers<void>();
@@ -33,10 +38,11 @@ function setup(t: TestContext, maxParallel = 2, failFirst = false) {
     if (failFirst && calls.length === 1) return realRunChange({ ...ctx, runSession: () => { throw new Error('boom'); } });
     return promise;
   };
-  const forge = { fetch: async () => {} } as unknown as Forge;
+  const queue = createQueue();
+  const forge = createForge({ root: repos.root, mainWorktree: repos.mainWorktree, queue });
   const engine = createEngine({
     store, bus, config, paths: { root: repos.root, sessionsDir: join(repos.dir, 'sessions') }, runSession,
-    worktrees, forge, committer: { flush: async () => {} }, runChange, tickMs: 60_000,
+    worktrees, forge, committer: { flush: async () => {} }, runChange, tickMs: 60_000, mainPollMs, clock,
   });
   t.after(async () => { await engine.stop(); db.close(); rmSync(repos.dir, { recursive: true, force: true }); });
   const runIds = () => calls.map((c) => c.ctx.runId);
@@ -46,7 +52,19 @@ function setup(t: TestContext, maxParallel = 2, failFirst = false) {
     store.transitionRun(r.id, 'running', 'paused');
     return r;
   };
-  return { repos, store, engine, calls, runIds, pausedRun };
+  const testRuns = () => { try { return readFileSync(testLog, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  /** Commits `files` (null = delete) to the clone and pushes to origin/main. */
+  const pushMain = (files: Record<string, string | null>) => {
+    for (const [f, body] of Object.entries(files)) {
+      if (body === null) rmSync(join(repos.root, f)); else { mkdirSync(join(repos.root, f, '..'), { recursive: true }); writeFileSync(join(repos.root, f), body); }
+    }
+    git(repos.root, ['add', '-A', '--', ...Object.keys(files)]); // not -A alone: dispatch leaves worktrees under .factory/
+    git(repos.root, ['commit', '-m', 'change']);
+    git(repos.root, ['push', 'origin', 'main']);
+    return git(repos.root, ['rev-parse', 'HEAD']);
+  };
+  const mainEvents = () => store.listEvents().filter((e) => e.type.startsWith('main.'));
+  return { repos, config, store, engine, calls, runIds, pausedRun, testRuns, pushMain, mainEvents, queue };
 }
 
 test('dispatches up to maxParallel, then more as runs finish', async (t) => {
@@ -183,4 +201,172 @@ test('an unexpected node error frees the slot', async (t) => {
   assert.equal(store.getItem(a.id).status, 'ready');
   assert.equal(store.getItem(b.id).status, 'active');
   assert.equal(store.getRetro(1)?.notes, 'node build errored: boom');
+});
+
+test('red main blocks dispatch and emits main.red once per SHA', async (t) => {
+  const { store, engine, calls, testRuns, pushMain, mainEvents } = setup(t);
+  const sha = pushMain({ BROKEN: 'x' });
+  const item = store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  await engine.tick();
+  assert.equal(calls.length, 0);
+  assert.equal(store.getItem(item.id).status, 'queued');
+  assert.equal(testRuns(), 1);
+  const [e, ...rest] = mainEvents();
+  assert.equal(rest.length, 0);
+  assert.equal(e.type, 'main.red');
+  assert.equal(e.data.sha, sha);
+  assert.equal(e.data.exit_code, 1);
+  assert.match(String(e.data.output), /broken main/);
+  assert.deepEqual({ sha: engine.mainHealth()?.sha, status: engine.mainHealth()?.status }, { sha, status: 'red' });
+});
+
+test('a fix on origin/main resumes dispatch and emits main.green', async (t) => {
+  const { store, engine, calls, pushMain, mainEvents } = setup(t);
+  pushMain({ BROKEN: 'x' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  assert.equal(calls.length, 0);
+  const fixed = pushMain({ BROKEN: null });
+  await engine.tick();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
+  assert.equal(engine.mainHealth()?.sha, fixed);
+  assert.equal(engine.mainHealth()?.status, 'green');
+});
+
+test('a factory.db-only commit reuses the previous main result; a code commit re-tests', async (t) => {
+  const { store, engine, testRuns, pushMain } = setup(t, 5);
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  assert.equal(testRuns(), 1);
+  store.createItem({ title: 'b', status: 'queued' });
+  const dbSha = pushMain({ '.factory/factory.db': 'state' });
+  await engine.tick();
+  assert.equal(testRuns(), 1);
+  assert.equal(engine.mainHealth()?.sha, dbSha);
+  store.createItem({ title: 'c', status: 'queued' });
+  pushMain({ '.factory/factory.db': 'state2', 'src.txt': 'code' });
+  await engine.tick();
+  assert.equal(testRuns(), 2);
+});
+
+test('health refreshes on a tick with nothing dispatchable', async (t) => {
+  const { engine, pushMain, mainEvents } = setup(t);
+  pushMain({ BROKEN: 'x' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.status, 'red');
+  const fixed = pushMain({ BROKEN: null });
+  await engine.tick();
+  assert.deepEqual({ sha: engine.mainHealth()?.sha, status: engine.mainHealth()?.status }, { sha: fixed, status: 'green' });
+  assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
+});
+
+test('the worktree is created from the checked SHA', async (t) => {
+  const { store, engine, calls, pushMain } = setup(t);
+  const sha = pushMain({ ok: 'x' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, sha);
+  assert.equal(git(calls[0].ctx.paths.root, ['rev-parse', 'factory/1-1']), sha);
+});
+
+test('stop() kills a running main check', async (t) => {
+  const { store, engine, config } = setup(t);
+  config.defaultTestCmd = 'sleep 30';
+  store.createItem({ title: 'a', status: 'queued' });
+  void engine.tick();
+  await sleep(300);
+  const started = Date.now();
+  await engine.stop();
+  assert.ok(Date.now() - started < 5000);
+  assert.equal(engine.mainHealth(), undefined);
+});
+
+test('a factory.db-only commit on red main emits main.red for the new SHA without re-running the command', async (t) => {
+  const { store, engine, testRuns, pushMain, mainEvents } = setup(t);
+  const red = pushMain({ BROKEN: 'x' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  const dbSha = pushMain({ '.factory/factory.db': 'state' });
+  await engine.tick();
+  await engine.tick();
+  assert.equal(testRuns(), 1);
+  assert.deepEqual(mainEvents().map((e) => [e.type, e.data.sha, e.data.exit_code]), [['main.red', red, 1], ['main.red', dbSha, 1]]);
+  assert.match(String(mainEvents()[1].data.output), /broken main/);
+  assert.equal(engine.mainHealth()?.sha, dbSha);
+});
+
+test('origin is fetched at most once per poll interval', async (t) => {
+  const { store, engine, calls, pushMain } = setup(t, 5, false, 60_000);
+  const first = pushMain({ ok: '1' });
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  pushMain({ BROKEN: 'x' });
+  store.createItem({ title: 'b', status: 'queued' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, first);
+  assert.equal(calls.length, 2); // dispatched on the cached green result
+});
+
+test('a green main is not fetched while nothing is dispatchable', async (t) => {
+  const { store, engine, pushMain } = setup(t);
+  const first = pushMain({ ok: '1' });
+  await engine.tick();
+  pushMain({ ok: '2' });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, first);
+  store.createItem({ title: 'a', status: 'queued' });
+  await engine.tick();
+  assert.notEqual(engine.mainHealth()?.sha, first);
+});
+
+test('red main keeps polling at the poll interval so main.green fires', async (t) => {
+  const { engine, pushMain, mainEvents } = setup(t, 2, false, 150);
+  pushMain({ BROKEN: 'x' });
+  await engine.tick();
+  pushMain({ BROKEN: null });
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.status, 'red'); // within the interval
+  await sleep(200);
+  await engine.tick();
+  assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
+});
+
+test('a failed fetch with no cached result is not retried within the poll interval', async (t) => {
+  let now = 0;
+  const { repos, store, engine } = setup(t, 2, false, 60_000, () => now);
+  store.createItem({ title: 'a', status: 'queued' });
+  const good = git(repos.root, ['remote', 'get-url', 'origin']);
+  git(repos.root, ['remote', 'set-url', 'origin', join(repos.dir, 'missing.git')]);
+  await engine.tick();
+  git(repos.root, ['remote', 'set-url', 'origin', good]);
+  now = 59_999;
+  await engine.tick();
+  assert.equal(engine.mainHealth(), undefined);
+  now = 60_000;
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.status, 'green');
+});
+
+test('the poll interval counts from the fetch, not from the request that waited in the forge queue', async (t) => {
+  let now = 0;
+  const { store, engine, queue, pushMain } = setup(t, 2, false, 60_000, () => now);
+  const first = pushMain({ ok: '1' });
+  store.createItem({ title: 'a', status: 'queued' });
+  const gate = Promise.withResolvers<void>();
+  const held = queue.run(() => gate.promise);
+  const ticking = engine.tick();
+  now = 100_000;
+  gate.resolve();
+  await held;
+  await ticking;
+  pushMain({ ok: '2' });
+  now = 130_000;
+  await engine.tick();
+  assert.equal(engine.mainHealth()?.sha, first); // 30 s after the fetch: no new fetch
+  now = 160_000;
+  store.createItem({ title: 'b', status: 'queued' });
+  await engine.tick();
+  assert.notEqual(engine.mainHealth()?.sha, first);
 });

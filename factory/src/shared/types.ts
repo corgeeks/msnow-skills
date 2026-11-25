@@ -9,7 +9,7 @@ export type Tier = (typeof TIERS)[number];
 export type GateDecision = 'approve' | 'reject' | 'override';
 export type EventType =
   | 'item.created' | 'item.updated' | 'run.created' | 'run.updated'
-  | 'node.updated' | 'gate.opened' | 'gate.closed' | 'retro.recorded';
+  | 'node.updated' | 'gate.opened' | 'gate.closed' | 'retro.recorded' | 'main.red' | 'main.green';
 
 export interface WorkItem {
   id: number; parent_id: number | null; type: string; title: string; body: string;
@@ -37,6 +37,8 @@ export interface FactoryEvent {
   seq: number; item_id: number | null; run_id: number | null; node: string | null;
   type: EventType; data: Record<string, unknown>; at: string;
 }
+/** Health of `origin/main` under `config.defaultTestCmd`; in GET /api/health as `main` (null until first checked). */
+export interface MainHealth { sha: string; status: 'green' | 'red'; checked_at: string }
 export interface Activity { run_id: number; node: string; text: string; at: string } // transient, never persisted
 export interface BatchItem {          // POST /api/items/batch input (import + CLI)
   ref: string; parent_ref?: string; depends_on_refs?: string[];
