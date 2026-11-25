@@ -10,7 +10,7 @@ export type EngineDeps = Omit<ChangeContext, 'runId' | 'stopped'> & {
   tickMs?: number;
   /** Minimum ms between origin fetches for the main-health check (default 60 s). */
   mainPollMs?: number;
-  /** Clock for the fetch interval (ms); tests inject one. */
+  /** Monotonic clock (ms) for the fetch interval; tests inject one. Wall time is only used for `checked_at`. */
   clock?: () => number;
 };
 
@@ -45,7 +45,7 @@ export function createEngine(deps: EngineDeps) {
   const mainResults = new Map<string, MainResult>();
   let main: MainHealth | undefined;
   let lastFetch: number | undefined;
-  const clock = deps.clock ?? Date.now;
+  const clock = deps.clock ?? (() => performance.now());
   const mainPollMs = deps.mainPollMs ?? 60_000;
 
   const abort = new AbortController();

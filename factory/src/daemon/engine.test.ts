@@ -322,13 +322,14 @@ test('a green main is not fetched while nothing is dispatchable', async (t) => {
 });
 
 test('red main keeps polling at the poll interval so main.green fires', async (t) => {
-  const { engine, pushMain, mainEvents } = setup(t, 2, false, 150);
+  let now = 0;
+  const { engine, pushMain, mainEvents } = setup(t, 2, false, 60_000, () => now);
   pushMain({ BROKEN: 'x' });
   await engine.tick();
   pushMain({ BROKEN: null });
   await engine.tick();
-  assert.equal(engine.mainHealth()?.status, 'red'); // within the interval
-  await sleep(200);
+  assert.equal(engine.mainHealth()?.status, 'red'); // within the interval: no fetch
+  now = 60_000;
   await engine.tick();
   assert.deepEqual(mainEvents().map((e) => e.type), ['main.red', 'main.green']);
 });
